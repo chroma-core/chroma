@@ -27,6 +27,9 @@ class UpdateEmbedding(BaseModel):
     ids: List[str]
 
 
+MAX_U32 = 4294967295
+
+
 class QueryEmbedding(BaseModel):
     # TODO: Pydantic doesn't bode well with recursive types so we use generic Dicts
     # for Where and WhereDocument. This is not ideal, but it works for now since
@@ -34,7 +37,7 @@ class QueryEmbedding(BaseModel):
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
     query_embeddings: List[Any]
-    n_results: int = 10
+    n_results: int = Field(default=10, ge=0, le=MAX_U32)
     include: Include = IncludeMetadataDocumentsDistances
 
 
@@ -42,8 +45,8 @@ class GetEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
-    limit: Optional[int] = None
-    offset: Optional[int] = None
+    limit: Optional[int] = Field(default=None, ge=0, le=MAX_U32)
+    offset: Optional[int] = Field(default=None, ge=0, le=MAX_U32)
     include: Include = IncludeMetadataDocuments
 
 
@@ -51,7 +54,7 @@ class DeleteEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
-    limit: Optional[int] = Field(default=None, ge=0)
+    limit: Optional[int] = Field(default=None, ge=0, le=MAX_U32)
 
 
 class CreateCollection(BaseModel):
