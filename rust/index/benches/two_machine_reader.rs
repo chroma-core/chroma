@@ -974,8 +974,16 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             runner,
             walk: gt_leaves.as_ref().map(|m| (reader.as_ref(), m)),
             config,
-            policy: ReadBeamPolicy::uniform(config.tau, config.beam_min, config.beam_max)
-                .with_level_beam_maxes(config.level_beam_max.clone()),
+            policy: ReadBeamPolicy::with_level_overrides(
+                config.tau,
+                config.beam_min,
+                config.beam_max,
+                config.level_tau.clone(),
+                vec![],
+                vec![],
+            )
+            .with_level_beam_maxes(config.level_beam_max.clone())
+            .with_level_beam_mins(config.level_beam_min.clone()),
             centroid_code_bytes: reader.centroid_code_bytes() as u64,
             record_leaves: args.record_leaves,
         };

@@ -160,6 +160,9 @@ pub struct ReadBeamPolicy {
     /// Per-level caps that replace `default_beam_max` at their level; 0 or
     /// a missing entry keeps the default.
     pub(super) level_beam_maxes: Vec<usize>,
+    /// Per-level floors that replace `default_beam_min` at their level; 0 or
+    /// a missing entry keeps the default.
+    pub(super) level_beam_mins: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -179,7 +182,14 @@ impl ReadBeamPolicy {
             level_min_pcts: Vec::new(),
             level_widths: Vec::new(),
             level_beam_maxes: Vec::new(),
+            level_beam_mins: Vec::new(),
         }
+    }
+
+    /// Floor the beam separately at each level (1-indexed by position).
+    pub fn with_level_beam_mins(mut self, mins: Vec<usize>) -> Self {
+        self.level_beam_mins = mins;
+        self
     }
 
     /// Cap the beam separately at each level (1-indexed by position).
@@ -204,6 +214,7 @@ impl ReadBeamPolicy {
             level_min_pcts,
             level_widths,
             level_beam_maxes: Vec::new(),
+            level_beam_mins: Vec::new(),
         }
     }
 
@@ -233,9 +244,13 @@ impl ReadBeamPolicy {
             (Some(width), Some(pct)) => Some(((width as f64) * (pct / 100.0)).ceil() as usize),
             _ => None,
         };
+        let default_min = match self.level_beam_mins.get(idx) {
+            Some(&floor) if floor > 0 => floor,
+            _ => self.default_beam_min,
+        };
         let beam_min = match scaled_floor {
-            Some(floor) => floor.max(self.default_beam_min),
-            None => self.default_beam_min,
+            Some(floor) => floor.max(default_min),
+            None => default_min,
         };
         let beam_max = match self.level_beam_maxes.get(idx) {
             Some(&cap) if cap > 0 => cap,

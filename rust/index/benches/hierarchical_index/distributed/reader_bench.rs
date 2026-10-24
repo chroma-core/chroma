@@ -113,6 +113,12 @@ pub struct BenchConfig {
     /// level; 0 or a missing entry keeps `beam_max`.
     #[serde(default)]
     pub level_beam_max: Vec<usize>,
+    /// Per-level beam floors, replacing `beam_min` at their level.
+    #[serde(default)]
+    pub level_beam_min: Vec<usize>,
+    /// Per-level distance-ratio filters; null keeps `tau` at that level.
+    #[serde(default)]
+    pub level_tau: Vec<Option<f64>>,
 }
 #[derive(Deserialize)]
 struct ConfigFile {
