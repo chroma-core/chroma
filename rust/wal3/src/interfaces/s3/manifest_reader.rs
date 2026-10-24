@@ -14,6 +14,7 @@ use crate::FragmentSeqNo;
 use crate::LogPosition;
 use crate::LogReaderOptions;
 use crate::Manifest;
+use crate::ManifestRefresh;
 use crate::Snapshot;
 use crate::SnapshotCache;
 use crate::SnapshotPointer;
@@ -78,6 +79,13 @@ impl ManifestConsumer<(FragmentSeqNo, LogPosition)> for ManifestReader {
             Ok(None) => Ok(None),
             Err(err) => Err(err),
         }
+    }
+
+    async fn manifest_refresh(&self, witness: &ManifestWitness) -> Result<ManifestRefresh, Error> {
+        let ManifestWitness::ETag(e_tag) = witness else {
+            return Err(Error::internal(file!(), line!()));
+        };
+        ManifestManager::refresh(&self.options.throttle, &self.storage, &self.prefix, e_tag).await
     }
 
     async fn update_intrinsic_cursor(

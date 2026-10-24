@@ -9,8 +9,8 @@ use tracing::Level;
 use crate::interfaces::{FragmentManagerFactory, ManifestManagerFactory};
 use crate::{
     fragment_path, parse_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
-    LogPosition, LogReaderOptions, LogWriterOptions, Manifest, MarkDirty, Snapshot, SnapshotCache,
-    SnapshotPointer, ThrottleOptions,
+    LogPosition, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndWitness, ManifestRefresh,
+    ManifestWitness, MarkDirty, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 pub mod fragment_puller;
@@ -258,6 +258,58 @@ pub async fn manifest_load(
             }
             Err(err) => match &*err {
                 StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                err => {
+                    let backoff = exp_backoff.next();
+                    tokio::time::sleep(backoff).await;
+                    if retries >= 3 {
+                        return Err(Error::StorageError(Arc::new(err.clone())));
+                    }
+                    retries += 1;
+                }
+            },
+        }
+    }
+}
+
+/// Refresh a cached manifest with one conditional object-storage request.
+pub async fn manifest_refresh(
+    options: &ThrottleOptions,
+    storage: &Storage,
+    prefix: &str,
+    e_tag: &ETag,
+) -> Result<ManifestRefresh, Error> {
+    let exp_backoff =
+        crate::backoff::ExponentialBackoff::new(options.throughput as f64, options.headroom as f64);
+    let mut retries = 0;
+    let path = crate::manifest::manifest_path(prefix);
+    loop {
+        match storage
+            .get_if_modified(
+                &path,
+                e_tag,
+                GetOptions::new(StorageRequestPriority::P0).with_strong_consistency(),
+            )
+            .await
+            .map_err(Arc::new)
+        {
+            Ok(None) => return Ok(ManifestRefresh::Unchanged),
+            Ok(Some((manifest, new_e_tag))) => {
+                let Some(new_e_tag) = new_e_tag else {
+                    return Err(Error::CorruptManifest(format!(
+                        "no ETag for manifest at {}",
+                        path
+                    )));
+                };
+                let manifest: Manifest = serde_json::from_slice(&manifest).map_err(|e| {
+                    Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}"))
+                })?;
+                return Ok(ManifestRefresh::Changed(Box::new(ManifestAndWitness {
+                    manifest,
+                    witness: ManifestWitness::ETag(new_e_tag),
+                })));
+            }
+            Err(err) => match &*err {
+                StorageError::NotFound { .. } => return Ok(ManifestRefresh::Missing),
                 err => {
                     let backoff = exp_backoff.next();
                     tokio::time::sleep(backoff).await;

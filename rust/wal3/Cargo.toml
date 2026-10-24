@@ -29,6 +29,7 @@ chroma-config = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["net"] }
 guacamole = { version = "0.11", default-features = false }
 proptest = { workspace = true }
 rand = { workspace = true }
