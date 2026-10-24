@@ -1235,7 +1235,15 @@ impl Cluster {
             .flat_map(|owner| std::iter::repeat_n(owner, workers))
             .collect::<Vec<_>>();
         self.schedule_shared_eligible()?;
-        let deadline = Instant::now() + Duration::from_secs(300);
+        // One balance pass must finish within this many seconds (300 unless
+        // SPANN_BALANCE_PASS_SECONDS overrides it). Large single-owner ladder
+        // builds hit dependent split cascades that run longer.
+        let pass_seconds = std::env::var("SPANN_BALANCE_PASS_SECONDS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(300);
+        let deadline = Instant::now() + Duration::from_secs(pass_seconds);
         std::thread::scope(|scope| {
             let handles = worker_owners
                 .into_iter()
