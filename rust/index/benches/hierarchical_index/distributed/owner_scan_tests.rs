@@ -597,3 +597,129 @@ fn scan_microbenchmark() {
         }
     }
 }
+
+/// Loopback cost of one scan RPC with a realistic payload (768-dim query, 300
+/// leaves, 10 results) and a trivial handler: the transport's fixed cost.
+/// Run with `cargo test --release ... scan_rpc_loopback -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn scan_rpc_loopback_cost() {
+    use super::super::transport::{current_server_request, last_call_timing, RequestClass};
+    let server = RpcServer::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.into(),
+        TransportConfig::default(),
+        Arc::new(move |request: ScanRequest| -> Result<ScanReply> {
+            let begin = Instant::now();
+            let server = current_server_request().unwrap_or_default();
+            let query: Vec<f32> = request.query.iter().map(|b| f32::from_bits(*b)).collect();
+            let results = (0..request.k as u64).map(|i| (i * 7 + request.leaves[0] as u64, query[i as usize].to_bits())).collect();
+            Ok(ScanReply {
+                results,
+                work: ScanWork::default(),
+                timing: ScanTiming { total: 1, ..Default::default() },
+                cpu_seconds: 0.0,
+                heap_peak_bytes: 0,
+                server,
+                server_handler_ns: begin.elapsed().as_nanos() as u64,
+            })
+        }),
+    )
+    .unwrap();
+    let client = RpcClient::new(server.data_addr(), server.control_addr(), TOKEN.into(), TransportConfig::default()).unwrap();
+    let mut seed = 0x2545f4914f6cdd1du64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let request = ScanRequest {
+        query: (0..768).map(|_| ((next() % 2000) as f32 / 1000.0 - 1.0).to_bits()).collect(),
+        leaves: (0..300).map(|_| (next() as u128) << 64 | next() as u128).collect(),
+        k: 10,
+        rerank: 4,
+    };
+    let mut rows = vec![];
+    for i in 0..3000 {
+        let before = client.counters();
+        let t = Instant::now();
+        let reply: ScanReply = client.call(&request, RequestClass::Data, Instant::now() + Duration::from_secs(5)).unwrap();
+        let total = t.elapsed().as_nanos() as u64;
+        assert_eq!(reply.results.len(), 10);
+        assert_eq!(reply.results[3].1, request.query[3]);
+        let call = last_call_timing();
+        let (sent, received) = delta(&client.counters(), &before);
+        if i >= 500 {
+            rows.push([
+                total,
+                call.connect_ns,
+                call.encode_ns,
+                call.write_ns,
+                call.first_byte_wait_ns,
+                call.read_ns,
+                call.decode_ns,
+                reply.server.before_handler_ns,
+                reply.server.read_ns,
+                reply.server.decode_queue_ns,
+                reply.server.decode_ns,
+                reply.server.dispatch_ns,
+                reply.server.worker_wake_ns,
+                reply.server_handler_ns,
+                sent,
+                received,
+            ]);
+        }
+    }
+    let names = [
+        "round_trip", "connect", "encode", "write", "first_byte_wait", "read", "decode", "server_before_handler",
+        "  server_read", "  server_decode_queue", "  server_decode", "  server_dispatch", "  server_worker_wake",
+        "server_handler", "bytes_sent", "bytes_received",
+    ];
+    for (c, name) in names.iter().enumerate() {
+        let mut v: Vec<u64> = rows.iter().map(|r| r[c]).collect();
+        v.sort_unstable();
+        let pct = |p: f64| v[((v.len() - 1) as f64 * p) as usize];
+        let bytes = c + 2 >= names.len();
+        let unit = if bytes { 1.0 } else { 1e3 };
+        println!(
+            "{name:>22}: p50 {:>8.1} p90 {:>8.1} p99 {:>8.1} {}",
+            pct(0.5) as f64 / unit,
+            pct(0.9) as f64 / unit,
+            pct(0.99) as f64 / unit,
+            if bytes { "B" } else { "us" }
+        );
+    }
+}
+
+#[test]
+fn scan_payloads_round_trip_exact_bits_as_base64_rows() {
+    let request = ScanRequest {
+        query: vec![0, 1, 0x7f7f_ffff, 0x8000_0000, 0xffff_ffff, 1.5f32.to_bits()],
+        leaves: vec![0, 1, u128::MAX, (7u128 << 100) | 3],
+        k: 3,
+        rerank: 2,
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert!(json["query_u32le_v1_base64"].is_string() && json["leaves_u128le_v1_base64"].is_string());
+    let back: ScanRequest = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!((back.query, back.leaves, back.k, back.rerank), (request.query, request.leaves, 3, 2));
+    let reply = ScanReply {
+        results: vec![(u64::MAX, (-0.0f32).to_bits()), (9, 2.25f32.to_bits())],
+        work: ScanWork::default(),
+        timing: ScanTiming::default(),
+        cpu_seconds: 0.0,
+        heap_peak_bytes: 0,
+        server: Default::default(),
+        server_handler_ns: 0,
+    };
+    let back: ScanReply = serde_json::from_slice(&serde_json::to_vec(&reply).unwrap()).unwrap();
+    assert_eq!(back.results, reply.results);
+    // A payload that is not whole rows, or the old decimal field, is refused.
+    let mut torn = json.clone();
+    torn["leaves_u128le_v1_base64"] = "AAAA".into();
+    assert!(serde_json::from_value::<ScanRequest>(torn).is_err());
+    let old = serde_json::json!({"query": [1, 2], "leaves": [3], "k": 1, "rerank": 0});
+    assert!(serde_json::from_value::<ScanRequest>(old).is_err());
+}
