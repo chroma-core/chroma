@@ -56,6 +56,18 @@ struct Args {
     /// Save before balancing and after placement at each multiple of this row count.
     #[arg(long, requires = "checkpoint_directory", conflicts_with_all = ["checkpoint_at", "checkpoint_after_add_at", "balance_only", "replay_queries"])]
     checkpoint_every: Option<u64>,
+    /// Save before balancing and after placement at each listed row count,
+    /// as explicit batch boundaries; combines with `--checkpoint-every`.
+    #[arg(long, value_delimiter = ',', requires = "checkpoint_directory", conflicts_with_all = ["checkpoint_at", "checkpoint_after_add_at", "balance_only", "replay_queries"])]
+    checkpoint_rows: Vec<u64>,
+    /// Longest allowed time from start to `--shutdown-at-unix`. Long builds,
+    /// such as a 100M single-owner ladder, raise it from the 90-minute default.
+    #[arg(long, default_value_t = 5400)]
+    max_run_seconds: u64,
+    /// Write periodic checkpoints only after balancing and placement, not
+    /// also before balancing; each is a complete recovery point on its own.
+    #[arg(long)]
+    checkpoint_after_balance_only: bool,
     /// Validate live writer membership and all posting codes after timing; omit reader publication.
     #[arg(long)]
     construction_only: bool,
@@ -261,8 +273,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.mode == "run" && args.owner != 1 {
         return Err("only owner one coordinates the campaign".into());
     }
-    if args.shutdown_at_unix <= now() || args.shutdown_at_unix - now() > 5400 {
-        return Err("requires a fresh absolute deadline within90minutes".into());
+    if args.shutdown_at_unix <= now() || args.shutdown_at_unix - now() > args.max_run_seconds {
+        return Err("requires a fresh absolute deadline within --max-run-seconds".into());
     }
     if args.output.exists() {
         return Err("output exists; preserve prior attempts".into());
@@ -471,7 +483,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // A requested insertion checkpoint is an explicit batch boundary.
         let end = args.checkpoint_after_add_at.map_or(end, |position| end.min(position));
         let end = if !skip_add {
-            args.checkpoint_every.map_or(end, |interval| end.min((start / interval + 1).saturating_mul(interval)))
+            let end = args.checkpoint_every.map_or(end, |interval| end.min((start / interval + 1).saturating_mul(interval)));
+            args.checkpoint_rows.iter().copied().filter(|r| *r > start).min().map_or(end, |r| end.min(r))
         } else { end };
         let ids = (start..end).collect::<Vec<_>>();
         let before_add = counts(&cluster)?;
@@ -495,8 +508,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             fs::write(args.output.join("result.json"), serde_json::to_vec_pretty(&receipt)?)?;
             return Ok(());
         }
-        let periodic_boundary = args.checkpoint_every.is_some_and(|interval| end % interval == 0 || end == args.rows);
-        if periodic_boundary && !skip_add {
+        let periodic_boundary = args.checkpoint_every.is_some_and(|interval| end % interval == 0 || end == args.rows)
+            || args.checkpoint_rows.contains(&end);
+        if periodic_boundary && !skip_add && !args.checkpoint_after_balance_only {
             let directory = args.checkpoint_directory.as_ref().unwrap().join(format!("rows-{end}-after-add"));
             cluster.checkpoint_phase(&directory, end, &descriptor.sha256, true, true)?;
             event(&mut events, json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_add_before_balance", "next_input":end, "directory":directory}))?;
