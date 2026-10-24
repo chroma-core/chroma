@@ -333,6 +333,22 @@ impl Block {
         }
     }
 
+    /// `get` for a caller that can predict the key's row index, for example
+    /// from the block's first key when keys are dense. Checks the key at
+    /// `hint` (two or three memory reads instead of a binary search over
+    /// cold rows) and falls back to `get` when the prediction is wrong.
+    pub fn get_with_hint<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+        key: K,
+        hint: usize,
+    ) -> Option<V> {
+        if self.match_prefix_key_at_index(prefix, &key, hint) {
+            return Some(V::get(self.data.column(2), hint));
+        }
+        self.get(prefix, key)
+    }
+
     /// Get the raw serialized bytes for a given key, skipping deserialization.
     /// Returns `None` if the key is not found or the value type does not
     /// support raw byte access.

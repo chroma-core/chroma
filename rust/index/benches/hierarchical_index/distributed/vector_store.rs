@@ -14,8 +14,8 @@
 //! from inside a tokio runtime thread, because `block_on` panics there.
 use super::generation_backend::DurableStoreConfig;
 use chroma_blockstore::{
-    arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileReader,
-    BlockfileWriter, BlockfileWriterOptions,
+    arrow::provider::BlockfileReaderOptions, key::KeyWrapper, provider::BlockfileProvider, Block,
+    BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
 };
 use chroma_cache::{foyer::Code, Cache, CacheError, FoyerCacheConfig, PersistentCache, Weighted};
 use chroma_config::{registry::Registry, Configurable};
@@ -79,7 +79,7 @@ pub const VECTOR_WRITE_CHUNK_BYTES: usize = 256 * 1024 * 1024;
 /// flushed chunk, so a small cache suffices.
 const WRITER_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Maximum block loads one `get_many` call keeps in flight.
+/// Maximum block loads one `get_many` or `with_rows` call keeps in flight.
 pub const MAX_CONCURRENT_BLOCK_LOADS: usize = 32;
 const NUM_CONCURRENT_BLOCK_FLUSHES: usize = 16;
 const MIN_BLOCK_SIZE_BYTES: usize = 16 * 1024;
@@ -158,7 +158,8 @@ impl VectorStoreLocation {
 /// cache. `bytes_loaded` sums their in-memory Arrow size, which is within a
 /// few percent of the stored object size but is not an exact wire count.
 /// `cache_hits` and `cache_misses` count block lookups in the shared cache;
-/// one `get_many` looks up each distinct block it needs once.
+/// one `get_many` or `with_rows` call looks up each distinct block it needs
+/// once.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct VectorStoreCounters {
     pub blocks_loaded: u64,
@@ -186,9 +187,9 @@ impl CacheStats {
     }
 }
 
-/// Wraps the block cache to count hits, misses, and storage loads. It is
-/// generic because the blockstore's `Block` type is not nameable outside its
-/// crate; `V` is inferred as `Block` where the provider is built.
+/// Wraps the block cache to count hits, misses, and storage loads. `V` is
+/// the blockstore's `Block`; the wrapper is generic only to state the bounds
+/// the cache traits need.
 struct CountingCache<V> {
     inner: Arc<dyn PersistentCache<Uuid, V>>,
     stats: Arc<CacheStats>,
@@ -258,20 +259,6 @@ where
     }
 }
 
-/// Type-erased handle that clears the block cache without naming `Block`.
-trait ClearBlocks: Send + Sync {
-    fn clear(&self) -> futures::future::BoxFuture<'_, Result<(), CacheError>>;
-}
-
-impl<V> ClearBlocks for CountingCache<V>
-where
-    V: Clone + Send + Sync + Weighted + Code + 'static,
-{
-    fn clear(&self) -> futures::future::BoxFuture<'_, Result<(), CacheError>> {
-        Box::pin(Cache::clear(self))
-    }
-}
-
 /// Foyer capacity, in the cache's weight units, for a byte budget.
 ///
 /// A block weighs `ceil(size / MiB)` with a minimum of 1 (see the blockstore's
@@ -289,31 +276,26 @@ fn block_cache_capacity(cache_bytes: u64, max_block_size_bytes: usize) -> usize 
 struct VectorStoreProvider {
     provider: BlockfileProvider,
     stats: Arc<CacheStats>,
-    clear: Arc<dyn ClearBlocks>,
+    /// The same block cache the provider reads through.
+    blocks: CountingCache<Block>,
 }
 
-type CacheParts<V> = (Box<dyn PersistentCache<Uuid, V>>, Arc<dyn ClearBlocks>);
-
-async fn build_counting_cache<V>(
+async fn build_counting_cache(
     capacity: usize,
     stats: Arc<CacheStats>,
-) -> Result<CacheParts<V>, String>
-where
-    V: Clone + Send + Sync + Weighted + Code + 'static,
-{
+) -> Result<CountingCache<Block>, String> {
     let inner = FoyerCacheConfig {
         name: "spann_vector_block_cache".to_string(),
         capacity,
         ..FoyerCacheConfig::default()
     }
-    .build_memory_persistent::<Uuid, V>()
+    .build_memory_persistent::<Uuid, Block>()
     .await
     .map_err(|e| format!("vector block cache: {e}"))?;
-    let cache = CountingCache {
+    Ok(CountingCache {
         inner: inner.into(),
         stats,
-    };
-    Ok((Box::new(cache.clone()), Arc::new(cache)))
+    })
 }
 
 impl VectorStoreProvider {
@@ -325,7 +307,7 @@ impl VectorStoreProvider {
         validate_block_size(max_block_size_bytes)?;
         let storage = location.storage().await?;
         let stats = Arc::new(CacheStats::default());
-        let (block_cache, clear) = build_counting_cache(
+        let blocks = build_counting_cache(
             block_cache_capacity(cache_bytes, max_block_size_bytes),
             stats.clone(),
         )
@@ -343,7 +325,7 @@ impl VectorStoreProvider {
         let provider = BlockfileProvider::new_arrow(
             storage,
             max_block_size_bytes,
-            block_cache,
+            Box::new(blocks.clone()),
             root_cache,
             NUM_CONCURRENT_BLOCK_FLUSHES,
             MAX_CONCURRENT_BLOCK_LOADS,
@@ -351,7 +333,7 @@ impl VectorStoreProvider {
         Ok(Self {
             provider,
             stats,
-            clear,
+            blocks,
         })
     }
 }
@@ -522,14 +504,15 @@ async fn commit_and_flush(writer: BlockfileWriter) -> Result<Uuid, String> {
 
 /// Reads one owner's full vectors from a leaf-ordinal blockfile.
 ///
-/// Blocks load lazily into a shared, byte-bounded in-memory cache. Each
-/// `get_many` call opens a short-lived blockfile reader, because a blockstore
-/// reader pins every block it loads until it is dropped; a per-call reader
-/// keeps memory bounded by the cache plus one call's blocks. The root is
-/// cached, so opening a per-call reader does no I/O. The reader is Send +
-/// Sync and supports concurrent `get_many` calls from many threads.
+/// Blocks load lazily into a shared, byte-bounded in-memory cache. A read
+/// fetches the blocks it needs from that cache (or storage) and holds them
+/// only for the call, so memory stays bounded by the cache plus one call's
+/// blocks. Each call opens a blockfile reader from the cached root, which
+/// costs no I/O; the reader is used only to locate blocks, never to pin them.
+/// The reader is Send + Sync and supports concurrent reads from many threads.
 pub struct VectorStoreReader {
     store: VectorStoreProvider,
+    index: BlockIndex,
     blockfile_id: Uuid,
     prefix_path: String,
     dimensions: usize,
@@ -567,14 +550,16 @@ impl VectorStoreReader {
             cache_bytes,
             reference.max_block_size_bytes,
         ))?;
-        let reader = Self {
+        let mut reader = Self {
             store,
+            index: BlockIndex::default(),
             blockfile_id,
             prefix_path: reference.prefix_path.clone(),
             dimensions: reference.dimensions,
             rows: reference.rows,
         };
         let count = rt.block_on(reader.count())?;
+        reader.index = rt.block_on(reader.blockfile())?.block_index().try_into()?;
         if count as u64 != reader.rows {
             return Err(format!(
                 "vector blockfile holds {count} rows, reference says {}",
@@ -611,43 +596,152 @@ impl VectorStoreReader {
         self.rows
     }
 
-    /// Returns the vectors for `(leaf, position)` keys in input order. Loads
-    /// the distinct blocks the keys need concurrently, with at most
-    /// `MAX_CONCURRENT_BLOCK_LOADS` in flight, then copies each vector out.
-    /// A missing key or a vector of the wrong length is an error.
+    /// Returns the vectors for `(leaf, position)` keys in input order, as
+    /// owned copies. `with_rows` reads the same rows without copying them.
     pub fn get_many(&self, keys: &[(u128, u32)]) -> Result<Vec<Arc<[f32]>>, String> {
-        if keys.is_empty() {
-            return Ok(Vec::new());
-        }
-        runtime().block_on(self.get_many_async(keys))
+        let mut rows: Vec<Option<Arc<[f32]>>> = vec![None; keys.len()];
+        self.with_rows(keys, |i, row| rows[i] = Some(Arc::from(row)))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| row.expect("with_rows visits every key"))
+            .collect())
     }
 
-    async fn get_many_async(&self, keys: &[(u128, u32)]) -> Result<Vec<Arc<[f32]>>, String> {
-        use futures::stream::{self, StreamExt, TryStreamExt};
-        let reader = self.blockfile().await?;
-        // Each get finds its block by binary search in the root's block index
-        // and loads it through the shared cache. A batched preload would walk
-        // the whole index (about 60,000 blocks per 10M-vector owner) per call.
-        let reader = &reader;
-        stream::iter(keys.iter().map(|&(leaf, position)| async move {
-            let prefix = leaf_prefix(leaf);
-            let vector = reader
-                .get(&prefix, position)
-                .await
-                .map_err(|e| format!("read leaf {leaf} position {position}: {e}"))?
+    /// Calls `f(i, row)` once for each key `keys[i]`, with the row borrowed
+    /// from its cached block. Calls arrive in storage order (by leaf, then
+    /// position), not input order. A missing key or a vector of the wrong
+    /// length is an error, reported before `f` is called for any key.
+    ///
+    /// Each distinct block the keys need is looked up in the block cache
+    /// once, and blocks that miss load from storage concurrently, with at most
+    /// `MAX_CONCURRENT_BLOCK_LOADS` in flight. When every block is cached the
+    /// call does no I/O and does not wait on the storage runtime.
+    pub fn with_rows(
+        &self,
+        keys: &[(u128, u32)],
+        mut f: impl FnMut(usize, &[f32]),
+    ) -> Result<(), String> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let mut plan = self.plan(keys);
+        self.load_blocks(&mut plan)?;
+        let mut rows = Vec::with_capacity(keys.len());
+        for &(i, prefix, block, hint) in &plan.keys {
+            let (leaf, position) = keys[i];
+            let row = plan.blocks[block]
+                .as_ref()
+                .expect("load_blocks fills every block")
+                .get_with_hint::<u32, &[f32]>(&plan.prefixes[prefix], position, hint)
                 .ok_or_else(|| format!("missing vector for leaf {leaf} position {position}"))?;
-            if vector.len() != self.dimensions {
+            if row.len() != self.dimensions {
                 return Err(format!(
                     "leaf {leaf} position {position} has {} dimensions, expected {}",
-                    vector.len(),
+                    row.len(),
                     self.dimensions
                 ));
             }
-            Ok::<Arc<[f32]>, String>(Arc::from(vector))
-        }))
-        .buffered(MAX_CONCURRENT_BLOCK_LOADS)
-        .try_collect()
-        .await
+            rows.push((i, row));
+        }
+        for (i, row) in rows {
+            f(i, row);
+        }
+        Ok(())
+    }
+
+    /// Sorts the keys and finds the block each belongs to, without I/O.
+    fn plan(&self, keys: &[(u128, u32)]) -> RowPlan {
+        let mut order: Vec<usize> = (0..keys.len()).collect();
+        order.sort_unstable_by_key(|&i| keys[i]);
+        let mut plan = RowPlan {
+            keys: Vec::with_capacity(keys.len()),
+            prefixes: Vec::new(),
+            block_ids: Vec::new(),
+            blocks: Vec::new(),
+        };
+        let mut last_leaf = None;
+        // The first key past the previous key's block (`Some(None)` when that
+        // is the last block): sorted keys below it stay in the same block.
+        let mut current_end: Option<Option<(u128, u32)>> = None;
+        let mut current_start = (0u128, 0u32);
+        for i in order {
+            let key = keys[i];
+            if last_leaf != Some(key.0) {
+                plan.prefixes.push(leaf_prefix(key.0));
+                last_leaf = Some(key.0);
+            }
+            let same_block = current_end.is_some_and(|end| end.is_none_or(|end| key < end));
+            if !same_block {
+                let block = self.index.locate(key);
+                current_start = self.index.starts[block];
+                current_end = Some(self.index.starts.get(block + 1).copied());
+                plan.block_ids.push(self.index.ids[block]);
+            }
+            // A leaf's positions are dense, so within the leaf that starts the
+            // block the row index is the position offset. Other keys (and a
+            // wrong guess) fall back to a binary search in the block.
+            let hint = if key.0 == current_start.0 {
+                (key.1 - current_start.1) as usize
+            } else {
+                usize::MAX
+            };
+            plan.keys
+                .push((i, plan.prefixes.len() - 1, plan.block_ids.len() - 1, hint));
+        }
+        plan
+    }
+
+    /// Fills `plan.blocks`. Each distinct block is looked up in the cache
+    /// once, synchronously on the calling thread; only blocks that miss go to
+    /// the storage runtime, loaded concurrently. A block is held only by the
+    /// plan and the shared cache; no blockfile reader pins it.
+    fn load_blocks(&self, plan: &mut RowPlan) -> Result<(), String> {
+        use futures::{
+            stream::{self, StreamExt, TryStreamExt},
+            FutureExt,
+        };
+        let stats = &self.store.stats;
+        plan.blocks = plan
+            .block_ids
+            .iter()
+            .map(|id| {
+                // The in-memory cache answers without awaiting. A miss, an
+                // error, or a lookup that would wait is left to the async path,
+                // whose counted lookup records it.
+                let block = self.store.blocks.inner.obtain(*id).now_or_never();
+                let block = block.and_then(Result::ok).flatten();
+                if block.is_some() {
+                    stats.cache_hits.fetch_add(1, Ordering::Relaxed);
+                }
+                block
+            })
+            .collect();
+        let missing: Vec<usize> = (0..plan.blocks.len())
+            .filter(|&b| plan.blocks[b].is_none())
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let ids = &plan.block_ids;
+        let loaded: Vec<Block> = runtime().block_on(async {
+            let reader = self.blockfile().await?;
+            let reader = &reader;
+            stream::iter(missing.iter().map(|&b| async move {
+                let id = ids[b];
+                reader
+                    .fetch_block(id)
+                    .await
+                    .map_err(|e| format!("load vector block {id}: {e}"))?
+                    .ok_or_else(|| format!("vector block {id} not found"))
+            }))
+            .buffered(MAX_CONCURRENT_BLOCK_LOADS)
+            .try_collect()
+            .await
+        })?;
+        for (b, block) in missing.into_iter().zip(loaded) {
+            plan.blocks[b] = Some(block);
+        }
+        Ok(())
     }
 
     /// Cumulative counters since this reader opened.
@@ -659,9 +753,67 @@ impl VectorStoreReader {
     /// cached root is kept.
     pub fn clear_cache(&self) -> Result<(), String> {
         runtime()
-            .block_on(self.store.clear.clear())
+            .block_on(Cache::clear(&self.store.blocks))
             .map_err(|e| format!("clear vector block cache: {e}"))
     }
+}
+
+/// The blockfile's sparse index in a compact form: block `i` holds the keys
+/// in `[starts[i], starts[i + 1])`, and `starts[0]` is the smallest key. One
+/// entry per block (about 60,000 for a 10M-vector owner, 2 MiB), built once
+/// when the reader opens, so a lookup is a binary search over a flat array
+/// instead of a walk of the root's string-keyed tree.
+#[derive(Default)]
+struct BlockIndex {
+    starts: Vec<(u128, u32)>,
+    ids: Vec<Uuid>,
+}
+
+impl BlockIndex {
+    /// The block whose range holds `key`.
+    fn locate(&self, key: (u128, u32)) -> usize {
+        self.starts
+            .partition_point(|start| *start <= key)
+            .saturating_sub(1)
+    }
+}
+
+impl TryFrom<Vec<(Option<(String, KeyWrapper)>, Uuid)>> for BlockIndex {
+    type Error = String;
+
+    fn try_from(entries: Vec<(Option<(String, KeyWrapper)>, Uuid)>) -> Result<Self, String> {
+        let mut index = BlockIndex::default();
+        for (start, id) in entries {
+            let start = match start {
+                None => (0, 0),
+                Some((prefix, KeyWrapper::Uint32(position))) if prefix.len() == 32 => {
+                    let leaf = u128::from_str_radix(&prefix, 16)
+                        .map_err(|e| format!("vector block start prefix {prefix:?}: {e}"))?;
+                    (leaf, position)
+                }
+                Some(other) => return Err(format!("vector block start key {other:?}")),
+            };
+            if index.starts.last().is_some_and(|last| *last >= start) {
+                return Err(format!("vector block starts out of order at {start:?}"));
+            }
+            index.starts.push(start);
+            index.ids.push(id);
+        }
+        if index.ids.is_empty() {
+            return Err("vector blockfile has no blocks".into());
+        }
+        Ok(index)
+    }
+}
+
+/// One read's work: for each key in storage order its input index, prefix
+/// index, block index, and predicted row in that block; then the distinct
+/// blocks, in key order.
+struct RowPlan {
+    keys: Vec<(usize, usize, usize, usize)>,
+    prefixes: Vec<String>,
+    block_ids: Vec<Uuid>,
+    blocks: Vec<Option<Block>>,
 }
 
 #[cfg(test)]
