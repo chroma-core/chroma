@@ -68,6 +68,12 @@ struct Args {
     /// also before balancing; each is a complete recovery point on its own.
     #[arg(long)]
     checkpoint_after_balance_only: bool,
+    /// After restoring a balanced checkpoint at exactly `--rows`, redistribute
+    /// it between the two owners with `--owner-budget` each before saving.
+    /// Ladder builds keep every row on owner 1 until the end, so each smaller
+    /// ladder size is placed only when its generation is saved.
+    #[arg(long, requires = "restore_checkpoint")]
+    place_after_restore: bool,
     /// Validate live writer membership and all posting codes after timing; omit reader publication.
     #[arg(long)]
     construction_only: bool,
@@ -466,6 +472,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::write(args.output.join("replay-results.json"), serde_json::to_vec(&results)?)?;
         fs::write(args.output.join("replay.json"), serde_json::to_vec(&json!({"seconds":replay_seconds,"queries":args.replay_queries,"owners":counts(&cluster)?}))?)?;
         return Ok(());
+    }
+    if args.place_after_restore {
+        if resume_input != args.rows || balance_pending {
+            return Err("--place-after-restore needs a balanced checkpoint at exactly the workload rows".into());
+        }
+        let t = Instant::now();
+        let report = cluster.redistribute(BTreeMap::from([(1, args.owner_budget), (2, args.owner_budget)]))?;
+        event(
+            &mut events,
+            json!({"event":"restored_placement_complete","seconds":t.elapsed().as_secs_f64(),"placement_report":placement_plan_json(&report),"vector_budget_per_owner":args.owner_budget,"owners":counts(&cluster)?}),
+        )?;
     }
     let mut start = resume_input;
     let mut cycles = vec![];
