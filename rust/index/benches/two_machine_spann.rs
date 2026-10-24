@@ -116,7 +116,8 @@ struct Args {
     save_vector_store: bool,
     #[arg(long, default_value_t = 16)]
     validation_queries: usize,
-    /// Conservative resident corpus-cache allowance per machine, including row allocations.
+    /// Conservative resident corpus-cache allowance per machine, including row
+    /// allocations; 0 reads vectors from the input file on demand.
     #[arg(long, default_value_t = 12 * 1024 * 1024 * 1024u64)]
     vector_cache_bytes: u64,
     /// Maximum request payload and reply chunk in bytes; configure both owners equally.
@@ -301,7 +302,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vector_identity_seconds = input_time.elapsed().as_secs_f64();
     let estimated_cache_bytes = vector_source.estimated_resident_bytes()?;
     let cache_warm = Instant::now();
-    let vectors = Arc::new(vector_source.preload_with_limit(args.vector_cache_bytes)?);
+    // A zero allowance reads each vector from the input file on demand,
+    // through the page cache, instead of holding a resident copy. A ladder
+    // build uses it on the idle second owner, whose rows arrive only at
+    // placement, so two owners fit on one machine.
+    let vectors = Arc::new(if args.vector_cache_bytes == 0 {
+        vector_source
+    } else {
+        vector_source.preload_with_limit(args.vector_cache_bytes)?
+    });
     event(
         &mut events,
         json!({"event":"input_ready","seconds":input_time.elapsed().as_secs_f64(),"owner":args.owner,"input":descriptor,"immutable_corpus_cache":"full input replicated independently on each owner, not posting membership replication","vector_cache_limit_bytes":args.vector_cache_bytes,"estimated_cache_resident_bytes":estimated_cache_bytes,"vector_identity_seconds":vector_identity_seconds,"cache_warming_seconds":cache_warm.elapsed().as_secs_f64(),"peak_rss":mem_probe::read_self().rss_peak}),
