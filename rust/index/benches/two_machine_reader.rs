@@ -791,7 +791,12 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     {
         let (mut leaves, mut internal) = (0usize, 0usize);
         let mut dump = match &args.dump_tree {
-            Some(path) => Some(BufWriter::new(File::create(path)?)),
+            Some(path) => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                Some(BufWriter::new(File::create(path)?))
+            }
             None => None,
         };
         for (id, parent, leaf, owner) in reader.tree_shape() {
