@@ -456,6 +456,22 @@ pub fn walk_diagnostics(
     }
 }
 
+/// Rank every leaf by exact squared distance from the query to its float32
+/// centroid, and return the rank (0 = nearest) of each true neighbor's leaf.
+/// Ties in distance break by leaf ID.
+pub fn exact_leaf_ranks(centroids: &[(u128, &[f32])], query: &[f32], truth: &[(u64, u128)]) -> Vec<usize> {
+    let mut scored: Vec<(f64, u128)> = centroids
+        .iter()
+        .map(|(id, c)| {
+            let d: f64 = c.iter().zip(query).map(|(a, b)| ((*a - *b) as f64).powi(2)).sum();
+            (d, *id)
+        })
+        .collect();
+    scored.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let rank: HashMap<u128, usize> = scored.iter().enumerate().map(|(i, (_, id))| (*id, i)).collect();
+    truth.iter().map(|(_, leaf)| rank.get(leaf).copied().unwrap_or(usize::MAX)).collect()
+}
+
 #[cfg(test)]
 #[path = "reader_bench_tests.rs"]
 mod tests;

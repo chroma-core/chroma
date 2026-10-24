@@ -148,6 +148,11 @@ struct Args {
     /// Bench: write the routing tree shape to this JSONL file after open.
     #[arg(long)]
     dump_tree: Option<PathBuf>,
+    /// Bench: also rank every leaf by exact distance to its float32 centroid
+    /// and report how many leaves cover each query's true neighbors. Needs a
+    /// v1 generation, whose routing nodes carry exact centroids.
+    #[arg(long)]
+    exact_leaf_ranking: bool,
     /// Where owner scans read full vectors for rerank: a local corpus copy, or
     /// each owner's vector blockfile saved with the generation.
     #[arg(long, value_enum, default_value_t = FullVectorSource::Corpus)]
@@ -556,6 +561,69 @@ fn walk_summary(records: &[Value]) -> Value {
         "optimal_recall": mean(&|w: &Value| w["optimal_recall"].as_f64()),
     })
 }
+/// Rank every leaf by exact centroid distance for each query and summarize,
+/// for k = 10 and 100: the mean share of true neighbors whose leaf ranks
+/// inside each beam, and per query the number of leaves that covers 95% and
+/// 100% of its true neighbors.
+fn exact_ranking_report(
+    reader: &SavedReader,
+    queries: &[BenchQuery],
+    gt_leaves: &std::collections::HashMap<u64, u128>,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let leaves: Vec<u128> = reader.leaves().collect();
+    let centroids: Vec<(u128, &[f32])> = leaves
+        .iter()
+        .map(|l| reader.node_centroid(*l).map(|c| (*l, c)))
+        .collect::<Option<_>>()
+        .ok_or("exact leaf ranking needs a v1 generation with exact leaf centroids")?;
+    const BEAMS: [usize; 10] = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192];
+    let t = Instant::now();
+    let ranks: Vec<Vec<usize>> = queries
+        .iter()
+        .map(|q| {
+            let truth: Vec<(u64, u128)> = q
+                .truth_ids
+                .iter()
+                .take(100)
+                .filter_map(|id| gt_leaves.get(id).map(|leaf| (*id, *leaf)))
+                .collect();
+            rb::exact_leaf_ranks(&centroids, &q.vector, &truth)
+        })
+        .collect();
+    let mut by_k = serde_json::Map::new();
+    for k in [10usize, 100] {
+        let coverage: Vec<Value> = BEAMS
+            .iter()
+            .map(|beam| {
+                let share = ranks
+                    .iter()
+                    .map(|r| r.iter().take(k).filter(|rank| **rank < *beam).count() as f64 / k as f64)
+                    .sum::<f64>()
+                    / ranks.len().max(1) as f64;
+                json!({"beam": beam, "leaf_reach": share})
+            })
+            .collect();
+        let needed = |fraction: f64| -> Value {
+            let mut v: Vec<f64> = ranks
+                .iter()
+                .map(|r| {
+                    let mut r: Vec<usize> = r.iter().take(k).copied().collect();
+                    r.sort_unstable();
+                    let i = ((fraction * k as f64).ceil() as usize).clamp(1, r.len().max(1)) - 1;
+                    r.get(i).map_or(f64::NAN, |x| *x as f64 + 1.0)
+                })
+                .collect();
+            v.sort_by(|a, b| a.total_cmp(b));
+            let at = |q: f64| v[((q * v.len() as f64) as usize).min(v.len() - 1)];
+            json!({"mean": v.iter().sum::<f64>() / v.len() as f64, "p50": at(0.5), "p90": at(0.9), "p99": at(0.99)})
+        };
+        by_k.insert(
+            format!("k{k}"),
+            json!({"coverage": coverage, "leaves_for_95pct": needed(0.95), "leaves_for_all": needed(1.0)}),
+        );
+    }
+    Ok(json!({"leaves": leaves.len(), "queries": queries.len(), "seconds": t.elapsed().as_secs_f64(), "by_k": by_k}))
+}
 /// Map every listed true neighbor of the loaded queries to its leaf, by
 /// scanning each posting list once. Loaded from `path` when it exists.
 fn gt_leaf_map(
@@ -884,6 +952,11 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         Some(gt_leaf_map(&reader, &queries, args.gt_leaf_map.as_deref())?)
     };
     let gt_leaf_map_seconds = t.elapsed().as_secs_f64();
+    let exact_ranking = match (&gt_leaves, args.exact_leaf_ranking) {
+        (Some(map), true) => exact_ranking_report(&reader, &queries, map)?,
+        (None, true) => return Err("--exact-leaf-ranking needs the diagnostics' leaf map".into()),
+        _ => Value::Null,
+    };
     let mut records = BufWriter::new(File::create(args.output.join("queries.jsonl"))?);
     let mut summaries = vec![];
     for config in &configs {
@@ -964,6 +1037,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         "routing_open_heap": routing_open_heap,
         "tree_nodes": tree_counts,
         "gt_leaf_map_seconds": gt_leaf_map_seconds,
+        "exact_leaf_ranking": exact_ranking,
         "vector_open_seconds": vector_open_seconds,
         "vector_open": vector_open,
         "open_rss_bytes": open_rss,

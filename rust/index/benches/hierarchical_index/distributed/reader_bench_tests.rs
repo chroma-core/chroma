@@ -146,3 +146,11 @@ fn walk_diagnostics_track_reach_per_level_and_the_optimal_leaf_budget() {
     assert_eq!(all.levels[1].reach, 1.0);
     assert_eq!(all.optimal_recall, 1.0);
 }
+
+#[test]
+fn exact_leaf_ranks_order_leaves_by_centroid_distance() {
+    let (a, b, c) = ([0.0f32, 0.0], [1.0f32, 0.0], [5.0f32, 0.0]);
+    let centroids = vec![(3u128, &c[..]), (1u128, &a[..]), (2u128, &b[..])];
+    let truth = vec![(10u64, 3u128), (11, 2), (12, 9)];
+    assert_eq!(exact_leaf_ranks(&centroids, &[0.9, 0.0], &truth), vec![2, 0, usize::MAX]);
+}
