@@ -57,7 +57,7 @@ Then, you can create the `RoboflowEmbeddingFunction`:
 ```python
 from chromadb.utils.embedding_functions import RoboflowEmbeddingFunction
 
-roboflow_ef = RoboflowEmbeddingFunction(api_key=API_KEY, server_url="http://localhost:9001")
+roboflow_ef = RoboflowEmbeddingFunction(api_key=API_KEY, api_url="http://localhost:9001")
 ```
 
 This function will calculate embeddings using your local Inference server instead of the Roboflow cloud.
