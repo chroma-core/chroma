@@ -395,6 +395,34 @@ fn answer(cx: &BenchContext, q: &BenchQuery, alone: bool) -> Result<Answer, Stri
             });
             let remote_request = remote.iter().map(|p| p.request_ns).max();
             let remote_owner = remote.iter().map(|p| p.timing.total).max();
+            // Where the slowest remote request spent its time, in seconds.
+            let remote_breakdown = remote.iter().max_by_key(|p| p.request_ns).map(|p| {
+                let s = |n: u64| n as f64 / 1e9;
+                let server_wall = p.server.before_handler_ns + p.server_handler_ns;
+                json!({
+                    "overhead": s(p.request_ns.saturating_sub(p.timing.total)),
+                    "client_spawn": s(p.client_spawn_ns),
+                    "client_build": s(p.client_build_ns),
+                    "call_connect": s(p.call.connect_ns),
+                    "call_encode": s(p.call.encode_ns),
+                    "call_write": s(p.call.write_ns),
+                    "call_first_byte_wait": s(p.call.first_byte_wait_ns),
+                    "call_read": s(p.call.read_ns),
+                    "call_decode": s(p.call.decode_ns),
+                    "client_results": s(p.client_results_ns),
+                    "server_read": s(p.server.read_ns),
+                    "server_decode_queue": s(p.server.decode_queue_ns),
+                    "server_decode": s(p.server.decode_ns),
+                    "server_dispatch": s(p.server.dispatch_ns),
+                    "server_worker_wake": s(p.server.worker_wake_ns),
+                    "server_handler": s(p.server_handler_ns),
+                    "server_handler_outside_scan": s(p.server_handler_ns.saturating_sub(p.timing.total)),
+                    // First reply byte wait not spent between the owner's first
+                    // request byte and its handler exit: the network both ways,
+                    // reply encoding and sending, and client wakeup.
+                    "unattributed": s(p.call.first_byte_wait_ns.saturating_sub(server_wall.saturating_sub(p.server.read_ns))),
+                })
+            });
             Ok(Answer {
                 results,
                 seconds,
@@ -423,6 +451,7 @@ fn answer(cx: &BenchContext, q: &BenchQuery, alone: bool) -> Result<Answer, Stri
                     "owners_contacted": record.parts.len(),
                     "remote_request_seconds": remote_request.map(|n| n as f64 / 1e9),
                     "remote_owner_seconds": remote_owner.map(|n| n as f64 / 1e9),
+                    "remote_breakdown_seconds": remote_breakdown,
                     "remote_cpu_seconds": alone.then(|| remote.iter().map(|p| p.remote_cpu_seconds).sum::<f64>()),
                     "remote_heap_peak_bytes": alone.then(|| remote.iter().map(|p| p.remote_heap_peak_bytes).max()).flatten(),
                     "parts": record.parts,
@@ -598,6 +627,7 @@ fn summarize(records: &[Value], pass_seconds: f64, network: Option<u64>) -> Valu
         "owners_contacted": stat(&["owners", "owners_contacted"]),
         "remote_request_ms": ms(&["owners", "remote_request_seconds"]),
         "remote_owner_ms": ms(&["owners", "remote_owner_seconds"]),
+        "remote_breakdown_ms": remote_breakdown_summary(records),
         "remote_cpu_ms": ms(&["owners", "remote_cpu_seconds"]),
         "remote_heap_peak_bytes": stat(&["owners", "remote_heap_peak_bytes"]),
         "network_received_bytes_all_traffic": network,
@@ -605,6 +635,28 @@ fn summarize(records: &[Value], pass_seconds: f64, network: Option<u64>) -> Valu
         "rss_peak_bytes": mem.rss_peak,
         "walk": walk_summary(records),
     })
+}
+/// Latency statistics for each phase of the slowest remote request per query.
+fn remote_breakdown_summary(records: &[Value]) -> Value {
+    let Some(keys) = records
+        .iter()
+        .find_map(|r| r.get("owners")?.get("remote_breakdown_seconds")?.as_object())
+        .map(|o| o.keys().cloned().collect::<Vec<_>>())
+    else {
+        return Value::Null;
+    };
+    let phases: serde_json::Map<_, _> = keys
+        .into_iter()
+        .map(|key| {
+            let values: Vec<f64> = records
+                .iter()
+                .filter_map(|r| r.get("owners")?.get("remote_breakdown_seconds")?.get(&key)?.as_f64())
+                .map(|x| x * 1e3)
+                .collect();
+            (key, json!(rb::stats(&values)))
+        })
+        .collect();
+    Value::Object(phases)
 }
 fn read_token(args: &Args) -> Result<String, Box<dyn std::error::Error>> {
     let path = args.token_file.as_ref().ok_or("--token-file is required")?;

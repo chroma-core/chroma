@@ -377,6 +377,63 @@ fn nanos(duration: Duration) -> u64 {
     duration.as_nanos().min(u64::MAX as u128) as u64
 }
 
+/// Where the calling thread's most recent `RpcClient::call` spent its time,
+/// in nanoseconds. Always collected; it costs a few clock reads per call.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct CallTiming {
+    /// Taking a cached socket (with its liveness probe) or connecting.
+    pub connect_ns: u64,
+    /// Serializing the request envelope to JSON.
+    pub encode_ns: u64,
+    /// Writing the request frame to the socket.
+    pub write_ns: u64,
+    /// From the last request byte written to the reply's length prefix
+    /// read: the network both ways plus all server-side work.
+    pub first_byte_wait_ns: u64,
+    /// Reading the rest of the reply frame.
+    pub read_ns: u64,
+    /// Decoding the reply JSON.
+    pub decode_ns: u64,
+}
+/// Server-side times of the request a handler is running, in nanoseconds,
+/// available to the handler through `current_server_request`.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct ServerRequestTiming {
+    /// First request byte read to the whole frame read.
+    pub read_ns: u64,
+    /// Whole frame read to a decoder thread picking it up.
+    pub decode_queue_ns: u64,
+    /// Envelope JSON decoding and the token check.
+    pub decode_ns: u64,
+    /// Decoded to the reactor handing the request to an execution worker.
+    pub dispatch_ns: u64,
+    /// Handed off to the worker thread starting it.
+    pub worker_wake_ns: u64,
+    /// First request byte read to the handler starting.
+    pub before_handler_ns: u64,
+}
+thread_local! {
+    static LAST_CALL: std::cell::Cell<CallTiming> = const { std::cell::Cell::new(CallTiming {
+        connect_ns: 0, encode_ns: 0, write_ns: 0, first_byte_wait_ns: 0, read_ns: 0, decode_ns: 0,
+    }) };
+    static SERVER_REQUEST: std::cell::Cell<Option<ServerRequestTiming>> = const { std::cell::Cell::new(None) };
+}
+fn update_call(f: impl FnOnce(&mut CallTiming)) {
+    LAST_CALL.with(|cell| {
+        let mut timing = cell.get();
+        f(&mut timing);
+        cell.set(timing);
+    });
+}
+/// Timing of this thread's most recent client call.
+pub fn last_call_timing() -> CallTiming {
+    LAST_CALL.with(|cell| cell.get())
+}
+/// Timing of the request the calling handler thread is serving, if any.
+pub fn current_server_request() -> Option<ServerRequestTiming> {
+    SERVER_REQUEST.with(|cell| cell.get())
+}
+
 fn validate(config: &TransportConfig, token: &str) -> Result<(), TransportError> {
     if token.is_empty()
         || config.max_frame_bytes == 0
@@ -454,17 +511,25 @@ fn receive<T: DeserializeOwned>(
     deadline: Instant,
     counters: &TransportCounters,
 ) -> Result<T, TransportError> {
+    let waiting = Instant::now();
     let mut prefix = [0; 4];
     read_exact_until(stream, &mut prefix, deadline, counters)?;
+    let reading = Instant::now();
+    update_call(|t| t.first_byte_wait_ns = nanos(reading - waiting));
     let len = u32::from_be_bytes(prefix) as usize;
     if len == CHUNKED_REPLY as usize {
-        return receive_chunked(stream, limit, deadline, counters);
+        let value = receive_chunked(stream, limit, deadline, counters);
+        // Chunked replies interleave reads with decoding.
+        update_call(|t| t.decode_ns = nanos(reading.elapsed()));
+        return value;
     }
     if len > limit {
         return Err(TransportError::FrameTooLarge);
     }
     let mut body = vec![0; len];
     read_exact_until(stream, &mut body, deadline, counters)?;
+    let decoding = Instant::now();
+    update_call(|t| t.read_ns = nanos(decoding - reading));
     let decode = detailed().then(|| counters.profile.operation(Scope::TransportDeserialize));
     let value = serde_json::from_slice(&body).map_err(|error| {
         #[cfg(test)]
@@ -473,6 +538,7 @@ fn receive<T: DeserializeOwned>(
         let _ = error;
         TransportError::Codec("invalid JSON frame".into())
     })?;
+    update_call(|t| t.decode_ns = nanos(decoding.elapsed()));
     remaining(deadline)?;
     drop(decode);
     counters.messages_received.fetch_add(1, Ordering::Relaxed);
@@ -489,11 +555,14 @@ fn send<T: Serialize>(
     remaining(deadline)?;
     // The writer refuses oversized values while encoding, before allocating an
     // unbounded serialization buffer. The receiver validates before allocating.
+    // The first four bytes hold the length prefix, so prefix and body leave
+    // in one write and, with Nagle off, usually one segment.
     let mut body = LimitedBuffer {
-        bytes: Vec::new(),
-        limit,
+        bytes: vec![0; 4],
+        limit: limit + 4,
         exceeded: false,
     };
+    let encoding = Instant::now();
     let encode = detailed().then(|| counters.profile.operation(Scope::TransportSerialize));
     serde_json::to_writer(&mut body, value).map_err(|error| {
         // The expansion codec enforces its independent field ceiling before
@@ -511,13 +580,12 @@ fn send<T: Serialize>(
     })?;
     remaining(deadline)?;
     drop(encode);
-    write_all_until(
-        stream,
-        &(body.bytes.len() as u32).to_be_bytes(),
-        deadline,
-        counters,
-    )?;
+    let writing = Instant::now();
+    update_call(|t| t.encode_ns = nanos(writing - encoding));
+    let len = (body.bytes.len() - 4) as u32;
+    body.bytes[..4].copy_from_slice(&len.to_be_bytes());
     write_all_until(stream, &body.bytes, deadline, counters)?;
+    update_call(|t| t.write_ns = nanos(writing.elapsed()));
     counters.messages_sent.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
@@ -587,6 +655,16 @@ struct ReplyWriter<'a> {
 }
 impl ReplyWriter<'_> {
     fn emit_chunk(&mut self) -> Result<(), TransportError> {
+        // Small chunks (every ordinary reply) leave with their prefix in one
+        // write; copying a large chunk would cost more than the extra write.
+        if self.buffer.len() <= 64 * 1024 {
+            let mut frame = Vec::with_capacity(self.buffer.len() + 4);
+            frame.extend_from_slice(&(self.buffer.len() as u32).to_be_bytes());
+            frame.extend_from_slice(&self.buffer);
+            write_all_until(self.stream, &frame, self.deadline, self.counters)?;
+            self.buffer.clear();
+            return Ok(());
+        }
         write_all_until(
             self.stream,
             &(self.buffer.len() as u32).to_be_bytes(),
@@ -792,6 +870,8 @@ impl RpcClient {
             RequestClass::Data => self.data_addr,
             RequestClass::Control => self.control_addr,
         };
+        LAST_CALL.with(|cell| cell.set(CallTiming::default()));
+        let connecting = Instant::now();
         let result = (|| {
             let slot = match class {
                 RequestClass::Data => 0,
@@ -825,6 +905,7 @@ impl RpcClient {
                 }
             };
             stream.set_nodelay(true)?;
+            update_call(|t| t.connect_ns = nanos(connecting.elapsed()));
             let millis = remaining(deadline)?.as_millis().min(u64::MAX as u128) as u64;
             if millis == 0 {
                 return Err(TransportError::Deadline);
@@ -944,6 +1025,10 @@ struct PendingFrame {
     body: Vec<u8>,
     started: Instant,
     queued: Instant,
+    /// Always-collected instants for `ServerRequestTiming`.
+    complete: Instant,
+    decode_started: Instant,
+    decoded: Instant,
     decode_ready: Option<Instant>,
     decode_finished: Option<Instant>,
     timing: ServerTiming,
@@ -958,6 +1043,9 @@ impl PendingFrame {
             body: Vec::new(),
             started: Instant::now(),
             queued: Instant::now(),
+            complete: Instant::now(),
+            decode_started: Instant::now(),
+            decoded: Instant::now(),
             decode_ready: None,
             decode_finished: None,
             timing: ServerTiming {
@@ -1136,7 +1224,18 @@ impl RpcServer {
                                 frame.timing.execution_queue_nanos = frame.decode_finished.map(|t| nanos(t.elapsed())).unwrap_or(0);
                             }
                             let handler_started = envelope.diagnostics.then(Instant::now);
+                            let starting = Instant::now();
+                            let since = |later: Instant, earlier: Instant| nanos(later.saturating_duration_since(earlier));
+                            SERVER_REQUEST.with(|cell| cell.set(Some(ServerRequestTiming {
+                                read_ns: since(frame.complete, frame.started),
+                                decode_queue_ns: since(frame.decode_started, frame.complete),
+                                decode_ns: since(frame.decoded, frame.decode_started),
+                                dispatch_ns: since(frame.queued, frame.decoded),
+                                worker_wake_ns: since(starting, frame.queued),
+                                before_handler_ns: since(starting, frame.started),
+                            })));
                             let reply = handler(envelope.request);
+                            SERVER_REQUEST.with(|cell| cell.set(None));
                             if let Some(started) = handler_started { frame.timing.handler_nanos = nanos(started.elapsed()); }
                             drop(execution);
                             let sent = if envelope.diagnostics {
@@ -1176,7 +1275,8 @@ impl RpcServer {
                     counters.spawned_workers.fetch_add(1, Ordering::Relaxed);
                     decoders.push(thread::spawn(move || loop {
                         let Ok(mut frame) = receiver.lock().recv() else { break };
-                        let decoding_started = detailed().then(Instant::now);
+                        frame.decode_started = Instant::now();
+                        let decoding_started = detailed().then_some(frame.decode_started);
                         if let Some(ready) = frame.decode_ready { frame.timing.decode_queue_nanos = nanos(ready.elapsed()); }
                         let decode = detailed().then(|| frame.counters.profile.operation(Scope::TransportDeserialize));
                         let envelope = serde_json::from_slice::<Envelope<Q>>(&frame.body)
@@ -1187,6 +1287,7 @@ impl RpcServer {
                                 else { Err(TransportError::Remote("unauthorized run".into())) }
                             });
                         drop(decode);
+                        frame.decoded = Instant::now();
                         if let Some(started) = decoding_started {
                             frame.timing.decode_nanos = nanos(started.elapsed());
                             frame.decode_finished = Some(Instant::now());
@@ -1252,7 +1353,8 @@ impl RpcServer {
                             Ok(false) => i += 1,
                             Ok(true) => {
                                 let mut frame = pending.swap_remove(i);
-                                frame.decode_ready = detailed().then(Instant::now);
+                                frame.complete = Instant::now();
+                                frame.decode_ready = detailed().then_some(frame.complete);
                                 match decode_sender.try_send(frame) {
                                     Ok(()) => decoding += 1,
                                     Err(mpsc::TrySendError::Full(frame)) | Err(mpsc::TrySendError::Disconnected(frame)) => {

@@ -16,7 +16,7 @@ use super::{
     reader_bench::distinct_pages,
     routing::NavigationWork,
     saved_reader::{SavedPostingList, SavedReader},
-    transport::{RequestClass, RpcClient, TransportSnapshot},
+    transport::{last_call_timing, CallTiming, RequestClass, RpcClient, ServerRequestTiming, TransportSnapshot},
 };
 use chroma_index::quantization::{Code, QuantizedQuery};
 use rayon::prelude::*;
@@ -64,10 +64,82 @@ struct ChunkWork {
     posting_bytes_scanned: u64,
 }
 
+/// Fixed-width little-endian rows carried as one base64 string. Decimal
+/// JSON numbers for ~1,000 query bits and 128-bit leaf IDs cost tens of
+/// microseconds to parse; one string field costs a few. The renamed fields
+/// make a peer built with the decimal encoding fail to decode instead of
+/// misreading.
+mod wire {
+    use base64::{prelude::BASE64_STANDARD, Engine};
+    use serde::{de::Error, Deserializer, Serializer};
+
+    pub trait Row: Sized {
+        const WIDTH: usize;
+        fn put(&self, out: &mut Vec<u8>);
+        fn get(raw: &[u8]) -> Self;
+    }
+    impl Row for u32 {
+        const WIDTH: usize = 4;
+        fn put(&self, out: &mut Vec<u8>) {
+            out.extend_from_slice(&self.to_le_bytes());
+        }
+        fn get(raw: &[u8]) -> Self {
+            u32::from_le_bytes(raw.try_into().unwrap())
+        }
+    }
+    impl Row for u128 {
+        const WIDTH: usize = 16;
+        fn put(&self, out: &mut Vec<u8>) {
+            out.extend_from_slice(&self.to_le_bytes());
+        }
+        fn get(raw: &[u8]) -> Self {
+            u128::from_le_bytes(raw.try_into().unwrap())
+        }
+    }
+    impl Row for (u64, u32) {
+        const WIDTH: usize = 12;
+        fn put(&self, out: &mut Vec<u8>) {
+            out.extend_from_slice(&self.0.to_le_bytes());
+            out.extend_from_slice(&self.1.to_le_bytes());
+        }
+        fn get(raw: &[u8]) -> Self {
+            (u64::from_le_bytes(raw[..8].try_into().unwrap()), u32::from_le_bytes(raw[8..].try_into().unwrap()))
+        }
+    }
+    pub fn serialize<T: Row, S: Serializer>(rows: &[T], serializer: S) -> Result<S::Ok, S::Error> {
+        let mut bytes = Vec::with_capacity(rows.len() * T::WIDTH);
+        for row in rows {
+            row.put(&mut bytes);
+        }
+        serializer.serialize_str(&BASE64_STANDARD.encode(bytes))
+    }
+    /// The transport bounds the frame before decoding, which bounds this
+    /// allocation too.
+    pub fn deserialize<'de, T: Row, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<T>, D::Error> {
+        struct Rows<T>(std::marker::PhantomData<T>);
+        impl<T: Row> serde::de::Visitor<'_> for Rows<T> {
+            type Value = Vec<T>;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "base64 of {}-byte little-endian rows", T::WIDTH)
+            }
+            fn visit_str<E: Error>(self, encoded: &str) -> Result<Self::Value, E> {
+                let bytes = BASE64_STANDARD.decode(encoded).map_err(E::custom)?;
+                if bytes.len() % T::WIDTH != 0 {
+                    return Err(E::custom("row payload length is not a multiple of the row width"));
+                }
+                Ok(bytes.chunks_exact(T::WIDTH).map(T::get).collect())
+            }
+        }
+        deserializer.deserialize_str(Rows(std::marker::PhantomData))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScanRequest {
     /// Query values as raw float bits, so the owner scores the same numbers.
+    #[serde(rename = "query_u32le_v1_base64", with = "wire")]
     pub query: Vec<u32>,
+    #[serde(rename = "leaves_u128le_v1_base64", with = "wire")]
     pub leaves: Vec<u128>,
     pub k: usize,
     pub rerank: usize,
@@ -129,6 +201,7 @@ pub struct ScanTiming {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScanReply {
     /// (vector ID, exact or 1-bit distance as raw float bits), best first.
+    #[serde(rename = "results_u64le_u32le_v1_base64", with = "wire")]
     pub results: Vec<(u64, u32)>,
     pub work: ScanWork,
     pub timing: ScanTiming,
@@ -138,6 +211,11 @@ pub struct ScanReply {
     /// in flight.
     pub cpu_seconds: f64,
     pub heap_peak_bytes: u64,
+    /// Owner-side transport phases before this handler started.
+    pub server: ServerRequestTiming,
+    /// Handler entry to exit on the owner, including query validation and
+    /// reply construction; JSON envelope decoding is in `server`.
+    pub server_handler_ns: u64,
 }
 
 /// Where an owner process reads full vectors for rerank.
@@ -396,23 +474,26 @@ impl ScanEngine {
     }
     /// Serve one remote scan request.
     pub fn handle(&self, request: ScanRequest) -> Result<ScanReply> {
-        if request.query.len() != self.reader.manifest.format.dimensions
-            || request.query.iter().any(|b| !f32::from_bits(*b).is_finite())
-        {
+        let begin = Instant::now();
+        let server = super::transport::current_server_request().unwrap_or_default();
+        let query: Vec<f32> = request.query.iter().map(|b| f32::from_bits(*b)).collect();
+        if query.len() != self.reader.manifest.format.dimensions || query.iter().any(|x| !x.is_finite()) {
             return Err("scan query has the wrong dimension or nonfinite values".into());
         }
         let cpu = super::reader_bench::process_cpu_seconds();
         super::reader_bench::start_heap_peak();
-        let query: Vec<f32> = request.query.iter().map(|b| f32::from_bits(*b)).collect();
         let scanned = self.scan(&query, &request.leaves, request.k, request.rerank);
         let heap_peak_bytes = super::reader_bench::finish_heap_peak();
         let (results, work, timing) = scanned?;
+        let cpu_seconds = super::reader_bench::process_cpu_seconds() - cpu;
         Ok(ScanReply {
             results: results.into_iter().map(|(id, d)| (id, d.to_bits())).collect(),
             work,
             timing,
-            cpu_seconds: super::reader_bench::process_cpu_seconds() - cpu,
+            cpu_seconds,
             heap_peak_bytes,
+            server,
+            server_handler_ns: begin.elapsed().as_nanos() as u64,
         })
     }
 }
@@ -430,8 +511,23 @@ pub struct OwnerPart {
     pub leaves: usize,
     pub work: ScanWork,
     pub timing: ScanTiming,
-    /// Query-machine view of a remote request: send to decoded reply.
+    /// Query-machine view of a remote request: request building to decoded
+    /// results. The fields below split it; all are zero for local parts.
     pub request_ns: u64,
+    /// Starting this owner's request thread on the query machine.
+    pub client_spawn_ns: u64,
+    /// Building the request (query bits and leaf IDs).
+    pub client_build_ns: u64,
+    /// The transport call on the query machine: socket checkout, envelope
+    /// encode, write, wait for the first reply byte, read and JSON decode.
+    pub call: CallTiming,
+    /// Turning the decoded reply's raw float bits into results.
+    pub client_results_ns: u64,
+    /// Owner-side phases from the first request byte to the handler start:
+    /// frame read, decode queue, envelope decode, dispatch, worker wake.
+    pub server: ServerRequestTiming,
+    /// Owner-side handler wall time; `timing.total` is the scan inside it.
+    pub server_handler_ns: u64,
     pub remote_cpu_seconds: f64,
     pub remote_heap_peak_bytes: u64,
     pub transport_bytes_sent: u64,
@@ -497,29 +593,34 @@ impl OwnerQuery {
                 return Err(format!("no process serves owner {owner}"));
             }
         }
-        let bits: Vec<u32> = query.iter().map(|x| x.to_bits()).collect();
         let (remote_parts, local_parts) = std::thread::scope(|scope| {
             let jobs: Vec<_> = self
                 .remotes
                 .iter()
                 .filter_map(|remote| {
-                    let leaves = groups.get(&remote.owner)?.clone();
-                    let request = ScanRequest {
-                        query: bits.clone(),
-                        leaves,
-                        k,
-                        rerank,
-                    };
+                    let leaves = groups.get(&remote.owner)?;
+                    let spawned = Instant::now();
                     Some(scope.spawn(move || -> Result<(OwnerPart, Vec<(u64, f32)>)> {
-                        let before = remote.client.counters();
                         let t = Instant::now();
+                        let client_spawn_ns = (t - spawned).as_nanos() as u64;
+                        let request = ScanRequest {
+                            query: query.iter().map(|x| x.to_bits()).collect(),
+                            leaves: leaves.clone(),
+                            k,
+                            rerank,
+                        };
+                        let client_build_ns = t.elapsed().as_nanos() as u64;
+                        let before = remote.client.counters();
                         let reply: ScanReply = remote
                             .client
                             .call(&request, RequestClass::Data, Instant::now() + self.deadline)
                             .map_err(|e| format!("owner {} scan failed: {e}", remote.owner))?;
-                        let request_ns = t.elapsed().as_nanos() as u64;
+                        let call = last_call_timing();
                         let (sent, received) = delta(&remote.client.counters(), &before);
+                        let decoding = Instant::now();
                         let results = reply.results.iter().map(|(id, d)| (*id, f32::from_bits(*d))).collect();
+                        let client_results_ns = decoding.elapsed().as_nanos() as u64;
+                        let request_ns = t.elapsed().as_nanos() as u64;
                         Ok((
                             OwnerPart {
                                 owner: remote.owner,
@@ -528,6 +629,12 @@ impl OwnerQuery {
                                 work: reply.work,
                                 timing: reply.timing,
                                 request_ns,
+                                client_spawn_ns,
+                                client_build_ns,
+                                call,
+                                client_results_ns,
+                                server: reply.server,
+                                server_handler_ns: reply.server_handler_ns,
                                 remote_cpu_seconds: reply.cpu_seconds,
                                 remote_heap_peak_bytes: reply.heap_peak_bytes,
                                 transport_bytes_sent: sent,
