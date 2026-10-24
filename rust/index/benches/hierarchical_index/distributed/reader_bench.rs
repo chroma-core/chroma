@@ -109,6 +109,10 @@ pub struct BenchConfig {
     pub beam_max: usize,
     #[serde(default)]
     pub tau: Option<f64>,
+    /// Per-level beam caps below the root, replacing `beam_max` at their
+    /// level; 0 or a missing entry keeps `beam_max`.
+    #[serde(default)]
+    pub level_beam_max: Vec<usize>,
 }
 #[derive(Deserialize)]
 struct ConfigFile {
@@ -314,6 +318,10 @@ pub fn start_heap_peak() {
 pub fn finish_heap_peak() -> u64 {
     HEAP_TRACKING.store(false, Ordering::Relaxed);
     HEAP_PEAK.load(Ordering::Relaxed).max(0) as u64
+}
+/// Net heap allocated since `start_heap_peak` and still held.
+pub fn heap_live() -> i64 {
+    HEAP_LIVE.load(Ordering::Relaxed)
 }
 
 /// User plus system CPU seconds for the whole process.

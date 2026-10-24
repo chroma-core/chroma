@@ -141,6 +141,13 @@ struct Args {
     /// Bench: skip the per-level and optimal recall diagnostics.
     #[arg(long)]
     no_diagnostics: bool,
+    /// Bench: add each query's chosen leaf IDs to its record, from the
+    /// diagnostic walk, for offline fan-out analysis.
+    #[arg(long)]
+    record_leaves: bool,
+    /// Bench: write the routing tree shape to this JSONL file after open.
+    #[arg(long)]
+    dump_tree: Option<PathBuf>,
     /// Where owner scans read full vectors for rerank: a local corpus copy, or
     /// each owner's vector blockfile saved with the generation.
     #[arg(long, value_enum, default_value_t = FullVectorSource::Corpus)]
@@ -327,6 +334,7 @@ struct BenchContext<'a> {
     config: &'a BenchConfig,
     policy: ReadBeamPolicy,
     centroid_code_bytes: u64,
+    record_leaves: bool,
 }
 struct Answer {
     results: Vec<(u64, f32)>,
@@ -480,10 +488,14 @@ fn run_query(
     let ids: Vec<u64> = a.results.iter().map(|(id, _)| *id).collect();
     // Diagnostics re-walk the tree outside the timed region; the traced walk
     // uses the same scoring and selection as the measured query.
+    let mut leaf_ids = Value::Null;
     let walk = match cx.walk {
         Some((reader, gt_leaves)) => {
             let (leaves, frontiers) = reader.navigate_traced(&q.vector, &cx.policy)?;
             let leaves: Vec<u128> = leaves.iter().map(|(n, _)| n.id).collect();
+            if cx.record_leaves {
+                leaf_ids = json!(leaves.iter().map(|l| format!("{l:032x}")).collect::<Vec<_>>());
+            }
             let truth: Vec<(u64, u128)> = q
                 .truth_ids
                 .iter()
@@ -506,6 +518,7 @@ fn run_query(
         "owners": a.owners,
         "heap_peak_bytes": heap_peak,
         "walk": walk,
+        "leaf_ids": leaf_ids,
     }))
 }
 const BYTE_FIELDS: [&str; 10] = [
@@ -767,9 +780,36 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         return Err("rerank needs the corpus or --full-vectors store; drop --no-vectors".into());
     }
     let begin = Instant::now();
+    let rss_before_open = mem_probe::read_self().rss;
+    rb::start_heap_peak();
     let (descriptor, reader) = open_reader(args)?;
+    let routing_open_heap = json!({"live_bytes": rb::heap_live(), "peak_bytes": rb::finish_heap_peak()});
+    let routing_open_rss = mem_probe::read_self().rss;
     let reader = Arc::new(reader);
     let routing_open_seconds = begin.elapsed().as_secs_f64();
+    let mut tree_counts = json!({});
+    {
+        let (mut leaves, mut internal) = (0usize, 0usize);
+        let mut dump = match &args.dump_tree {
+            Some(path) => Some(BufWriter::new(File::create(path)?)),
+            None => None,
+        };
+        for (id, parent, leaf, owner) in reader.tree_shape() {
+            if leaf { leaves += 1 } else { internal += 1 }
+            if let Some(out) = dump.as_mut() {
+                let posting_bytes = if leaf { reader.posting_object_bytes(id) } else { None };
+                serde_json::to_writer(&mut *out, &json!({
+                    "id": format!("{id:032x}"), "parent": parent.map(|p| format!("{p:032x}")),
+                    "leaf": leaf, "owner": owner, "posting_bytes": posting_bytes,
+                }))?;
+                out.write_all(b"\n")?;
+            }
+        }
+        if let Some(mut out) = dump {
+            out.flush()?;
+        }
+        tree_counts = json!({"leaves": leaves, "internal": internal});
+    }
     let t = Instant::now();
     let mut single_vectors = None;
     let mut mapped = None;
@@ -856,8 +896,10 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             runner,
             walk: gt_leaves.as_ref().map(|m| (reader.as_ref(), m)),
             config,
-            policy: ReadBeamPolicy::uniform(config.tau, config.beam_min, config.beam_max),
+            policy: ReadBeamPolicy::uniform(config.tau, config.beam_min, config.beam_max)
+                .with_level_beam_maxes(config.level_beam_max.clone()),
             centroid_code_bytes: reader.centroid_code_bytes() as u64,
+            record_leaves: args.record_leaves,
         };
         for &pass in &passes {
             let network = rb::network_received_bytes();
@@ -912,6 +954,10 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         // query, from S3 for a durable store or from local files otherwise.
         "posting_store": if args.storage_config.is_some() { "durable" } else { "local" },
         "routing_open_seconds": routing_open_seconds,
+        "rss_before_open_bytes": rss_before_open,
+        "routing_open_rss_bytes": routing_open_rss,
+        "routing_open_heap": routing_open_heap,
+        "tree_nodes": tree_counts,
         "gt_leaf_map_seconds": gt_leaf_map_seconds,
         "vector_open_seconds": vector_open_seconds,
         "vector_open": vector_open,

@@ -1351,6 +1351,10 @@ impl SavedReader {
     pub fn root_id(&self) -> u128 {
         self.root
     }
+    /// Every saved node as (id, parent, leaf, owner), in ID order.
+    pub fn tree_shape(&self) -> impl Iterator<Item = (u128, Option<u128>, bool, u64)> + '_ {
+        self.nodes.values().map(|n| (n.id, n.parent, n.leaf, n.owner))
+    }
     /// The root as a navigation entry point. A v2 root has a zero placeholder
     /// centroid, since navigation reads only its length.
     pub fn root_routing(&self) -> RoutingNode {
