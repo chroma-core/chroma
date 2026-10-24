@@ -360,3 +360,240 @@ fn traced_navigation_matches_local_navigation_and_records_each_level() {
         }
     }
 }
+
+/// The leaf scan as it stood before the shortlist cutoff: per-leaf
+/// allocations, every vector stored as a candidate and fixed chunks. It is
+/// the reference the fast scan must match and the baseline it is timed
+/// against.
+fn reference_scan(pool: &rayon::ThreadPool, q: &ScanQuery, leaves: &[LeafInput]) -> (Vec<Candidate>, ChunkWork) {
+    let dim = q.query.len();
+    let keep = q.keep;
+    let threads = pool.current_num_threads();
+    let chunk = leaves.len().div_ceil(threads * 2).max(1);
+    let slots: Vec<usize> = (0..leaves.len()).collect();
+    let scored: Vec<Result<(Vec<Candidate>, ChunkWork)>> = pool.install(|| {
+        slots
+            .par_chunks(chunk)
+            .map(|chunk_slots| {
+                let mut out = Vec::with_capacity(keep * 2);
+                let mut cw = ChunkWork::default();
+                let mut distances = vec![];
+                for &slot in chunk_slots {
+                    let p = &leaves[slot];
+                    let centroid = p.centroid;
+                    let residual: Vec<_> = q.query.iter().zip(centroid).map(|(q, c)| q - c).collect();
+                    let norm = centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    let dot = centroid.iter().zip(q.query).map(|(c, q)| c * q).sum();
+                    let qq = QuantizedQuery::new(&residual, Code::<1>::packed_len(dim), norm, dot, q.q_norm);
+                    distances.clear();
+                    distances.resize(p.ids.len(), 0.0);
+                    Code::<1>::distances_quantized_query(p.codes, q.metric, &qq, &mut distances);
+                    if distances.iter().any(|d| !d.is_finite()) {
+                        return Err("nonfinite saved posting score".to_string());
+                    }
+                    cw.leaves += 1;
+                    cw.vectors += p.ids.len() as u64;
+                    cw.posting_bytes_scanned += p.codes.len() as u64 + p.ids.len() as u64 * 8;
+                    out.extend(p.ids.iter().zip(&distances).enumerate().map(|(ordinal, (id, d))| Candidate {
+                        id: *id,
+                        distance: *d,
+                        slot: p.slot,
+                        ordinal: ordinal as u32,
+                    }));
+                    if out.len() >= keep * 2 {
+                        trim(&mut out, keep);
+                    }
+                }
+                trim(&mut out, keep);
+                Ok((out, cw))
+            })
+            .collect()
+    });
+    let mut shortlist = vec![];
+    let mut work = ChunkWork::default();
+    for result in scored {
+        let (part, cw) = result.unwrap();
+        work.add(&cw);
+        shortlist.extend(part);
+    }
+    trim(&mut shortlist, keep);
+    (shortlist, work)
+}
+
+/// Candidates as comparable keys, best first. Slot and ordinal are left out:
+/// equal keys from different leaves may legally swap which copy survives.
+fn keys(mut c: Vec<Candidate>) -> Vec<(u32, u64)> {
+    c.sort_unstable_by(candidate_order);
+    c.into_iter().map(|c| (c.distance.to_bits(), c.id)).collect()
+}
+
+struct Synthetic {
+    dim: usize,
+    centroids: Vec<Vec<f32>>,
+    ids: Vec<Vec<u64>>,
+    codes: Vec<Vec<u8>>,
+    norms: Vec<f32>,
+}
+impl Synthetic {
+    /// `leaves` leaves of `per_leaf` vectors each. With `ties`, every vector in
+    /// a leaf is the same point and IDs repeat across leaves, so distances tie
+    /// in long runs and equal (distance, ID) keys appear more than once.
+    fn new(leaves: usize, per_leaf: usize, dim: usize, ties: bool, seed: u64) -> Self {
+        let mut s = seed | 1;
+        let mut next = move || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f32 / (1u64 << 53) as f32 * 2.0 - 1.0
+        };
+        let mut out = Synthetic { dim, centroids: vec![], ids: vec![], codes: vec![], norms: vec![] };
+        for l in 0..leaves {
+            let centroid: Vec<f32> = (0..dim).map(|_| next()).collect();
+            let mut codes = Vec::with_capacity(per_leaf * Code::<1>::size(dim));
+            let shared: Vec<f32> = centroid.iter().map(|c| c + 0.3 * next()).collect();
+            for _ in 0..per_leaf {
+                let v: Vec<f32> = if ties { shared.clone() } else { centroid.iter().map(|c| c + 0.3 * next()).collect() };
+                codes.extend_from_slice(Code::<1>::quantize(&v, &centroid).as_ref());
+            }
+            let ids = if ties {
+                (0..per_leaf as u64).map(|i| i % 7).collect()
+            } else {
+                (0..per_leaf as u64).map(|i| (i * leaves as u64 + l as u64).wrapping_mul(0x9e37_79b9) % (1 << 40)).collect()
+            };
+            out.norms.push(norm(&centroid));
+            out.centroids.push(centroid);
+            out.ids.push(ids);
+            out.codes.push(codes);
+        }
+        out
+    }
+    fn inputs(&self) -> Vec<LeafInput<'_>> {
+        (0..self.centroids.len())
+            .map(|i| LeafInput {
+                slot: i as u32,
+                ids: &self.ids[i],
+                codes: &self.codes[i],
+                centroid: &self.centroids[i],
+                centroid_norm: self.norms[i],
+            })
+            .collect()
+    }
+    fn query(&self, seed: u64) -> Vec<f32> {
+        let c = &self.centroids[seed as usize % self.centroids.len()];
+        c.iter().enumerate().map(|(d, x)| x + 0.01 * ((d as u64 * 31 + seed) % 17) as f32).collect()
+    }
+}
+
+fn pool(threads: usize) -> rayon::ThreadPool {
+    rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap()
+}
+
+#[test]
+fn shortlist_cutoff_matches_a_full_sort_on_ties() {
+    // Few distinct distances and IDs, so most candidates tie with the cutoff.
+    let mut s = 7u64;
+    let mut next = move |m: u64| {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        s % m
+    };
+    for keep in [1, 2, 3, 10, 100] {
+        for (distinct_d, distinct_id) in [(1, 1), (1, 50), (3, 3), (5, 1000), (1000, 5)] {
+            let all: Vec<Candidate> = (0..5000)
+                .map(|o| Candidate {
+                    id: next(distinct_id),
+                    distance: [0.0f32, -0.0, 1.0, 2.5, -3.0][next(5) as usize] * next(distinct_d) as f32,
+                    slot: 0,
+                    ordinal: o,
+                })
+                .collect();
+            let mut list = Shortlist::new(keep);
+            let mut other = Shortlist::new(keep);
+            for (i, c) in all.iter().enumerate() {
+                let into = if i % 3 == 0 { &mut other } else { &mut list };
+                if into.admits(c.distance, c.id) {
+                    into.push(*c);
+                }
+            }
+            list.merge(other);
+            let mut full = all.clone();
+            full.sort_unstable_by(candidate_order);
+            full.truncate(keep);
+            assert_eq!(keys(list.finish()), keys(full), "keep={keep} d={distinct_d} id={distinct_id}");
+        }
+    }
+    // Leaves of identical points, where every score in a leaf ties and IDs
+    // repeat, and leaves of distinct points. Both are large enough to split
+    // across the scan pool.
+    let metric = chroma_distance::DistanceFunction::Euclidean;
+    for ties in [true, false] {
+        let data = Synthetic::new(40, 600, 64, ties, 3);
+        let inputs = data.inputs();
+        for keep in [1, 5, 13, 100, 2000] {
+            let query = data.query(keep as u64);
+            let q = ScanQuery { query: &query, q_norm: norm(&query), metric: &metric, keep };
+            let (expected, ew) = reference_scan(&pool(1), &q, &inputs);
+            for threads in [1, 3, 8] {
+                let (got, gw) = score_leaves(&pool(threads), &q, &inputs).unwrap();
+                assert_eq!(keys(got), keys(expected.clone()), "keep={keep} threads={threads}");
+                assert_eq!(gw, ew);
+            }
+        }
+    }
+}
+
+/// Times the leaf scan on a production-shaped request: 300 leaves of 1,450
+/// 768-dimension 1-bit codes, k = 10 and rerank 10. Run with
+/// `--release -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn scan_microbenchmark() {
+    let (leaves, per_leaf, dim, keep) = (300, 1450, 768, 100);
+    let data = Synthetic::new(leaves, per_leaf, dim, false, 11);
+    let inputs = data.inputs();
+    let metric = chroma_distance::DistanceFunction::Euclidean;
+    let vectors = (leaves * per_leaf) as f64;
+    let queries: Vec<Vec<f32>> = (0..40).map(|i| data.query(i * 7 + 1)).collect();
+    // Rounds alternate the two scans so load from other processes hits both
+    // alike; each reports its fastest round.
+    for threads in [1, 8, 16] {
+        let p = pool(threads);
+        let mut best = [(f64::MAX, f64::MAX); 2];
+        for _round in 0..7 {
+            for (v, fast) in [false, true].into_iter().enumerate() {
+                let run = |query: &Vec<f32>| {
+                    let q = ScanQuery { query, q_norm: norm(query), metric: &metric, keep };
+                    if fast { score_leaves(&p, &q, &inputs).unwrap() } else { reference_scan(&p, &q, &inputs) }
+                };
+                for query in queries.iter().take(2) {
+                    run(query);
+                }
+                let cpu = super::super::reader_bench::process_cpu_seconds();
+                let t = Instant::now();
+                for query in &queries {
+                    std::hint::black_box(run(query));
+                }
+                let wall = t.elapsed().as_secs_f64();
+                let cpu = super::super::reader_bench::process_cpu_seconds() - cpu;
+                best[v] = (best[v].0.min(wall), best[v].1.min(cpu));
+            }
+        }
+        let n = queries.len() as f64 * vectors;
+        for (name, (wall, cpu)) in ["reference", "shortlist"].into_iter().zip(best) {
+            println!(
+                "threads={threads:2} {name:9} wall {:6.2} ns/vector  cpu {:6.2} ns/vector  scan {:7.3} ms",
+                wall * 1e9 / n,
+                cpu * 1e9 / n,
+                wall * 1e3 / queries.len() as f64
+            );
+        }
+        for query in &queries {
+            let q = ScanQuery { query, q_norm: norm(query), metric: &metric, keep };
+            let (a, wa) = reference_scan(&p, &q, &inputs);
+            let (b, wb) = score_leaves(&p, &q, &inputs).unwrap();
+            assert_eq!(keys(a), keys(b));
+            assert_eq!(wa, wb);
+        }
+    }
+}

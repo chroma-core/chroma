@@ -39,31 +39,225 @@ fn by_score_then_id(a: &(u64, f32), b: &(u64, f32)) -> std::cmp::Ordering {
 
 /// A scored vector and where it sits: the request's leaf slot and its
 /// position in that leaf's posting list, which locates its full vector.
-#[derive(Clone, Copy)]
-struct Candidate {
-    id: u64,
-    distance: f32,
-    slot: u32,
-    ordinal: u32,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Candidate {
+    pub(crate) id: u64,
+    pub(crate) distance: f32,
+    pub(crate) slot: u32,
+    pub(crate) ordinal: u32,
 }
-fn candidate_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
+pub(crate) fn candidate_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
     a.distance.total_cmp(&b.distance).then(a.id.cmp(&b.id))
 }
-/// Keep only the best `keep` candidates once a list holds twice that many,
-/// so scan memory stays near the shortlist size instead of every vector.
+/// Keep only the best `keep` candidates.
 fn trim(candidates: &mut Vec<Candidate>, keep: usize) {
     if candidates.len() > keep {
         candidates.select_nth_unstable_by(keep - 1, candidate_order);
         candidates.truncate(keep);
     }
 }
-#[derive(Default)]
-struct ChunkWork {
-    leaves: u64,
-    vectors: u64,
-    posting_bytes_scanned: u64,
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ChunkWork {
+    pub(crate) leaves: u64,
+    pub(crate) vectors: u64,
+    pub(crate) posting_bytes_scanned: u64,
+}
+impl ChunkWork {
+    fn add(&mut self, o: &ChunkWork) {
+        self.leaves += o.leaves;
+        self.vectors += o.vectors;
+        self.posting_bytes_scanned += o.posting_bytes_scanned;
+    }
 }
 
+/// The best `keep` candidates seen so far, under the (distance, ID) order.
+///
+/// The list holds up to `2 * keep` entries and trims back to `keep` when
+/// full. After the first trim it remembers the worst kept entry, the cutoff:
+/// at least `keep` seen candidates are no worse than the cutoff, so any
+/// candidate strictly worse than it can never reach the final `keep` and is
+/// skipped without being stored. Equal keys are still admitted, so the
+/// result matches a full sort exactly.
+pub(crate) struct Shortlist {
+    keep: usize,
+    items: Vec<Candidate>,
+    cutoff: Option<(f32, u64)>,
+}
+impl Shortlist {
+    pub(crate) fn new(keep: usize) -> Self {
+        Self { keep: keep.max(1), items: vec![], cutoff: None }
+    }
+    /// The cutoff's distance, or infinity before the first trim.
+    #[inline(always)]
+    fn cutoff_distance(&self) -> f32 {
+        self.cutoff.map_or(f32::INFINITY, |(d, _)| d)
+    }
+    /// Whether a candidate could still reach the best `keep`.
+    #[inline(always)]
+    pub(crate) fn admits(&self, distance: f32, id: u64) -> bool {
+        match self.cutoff {
+            None => true,
+            Some((d, i)) => match distance.total_cmp(&d) {
+                std::cmp::Ordering::Less => true,
+                std::cmp::Ordering::Equal => id <= i,
+                std::cmp::Ordering::Greater => false,
+            },
+        }
+    }
+    #[inline(always)]
+    pub(crate) fn push(&mut self, c: Candidate) {
+        if self.items.capacity() == 0 {
+            self.items.reserve_exact(self.keep * 2);
+        }
+        self.items.push(c);
+        if self.items.len() >= self.keep * 2 {
+            self.trim();
+        }
+    }
+    fn trim(&mut self) {
+        if self.items.len() > self.keep {
+            let (_, nth, _) = self.items.select_nth_unstable_by(self.keep - 1, candidate_order);
+            let cut = (nth.distance, nth.id);
+            self.items.truncate(self.keep);
+            self.cutoff = Some(cut);
+        }
+    }
+    pub(crate) fn merge(&mut self, other: Shortlist) {
+        for c in other.items {
+            if self.admits(c.distance, c.id) {
+                self.push(c);
+            }
+        }
+    }
+    pub(crate) fn finish(mut self) -> Vec<Candidate> {
+        self.trim();
+        self.items
+    }
+}
+
+/// One leaf ready to score: its slot in the request, its posting list, its
+/// scoring centroid and that centroid's norm.
+pub(crate) struct LeafInput<'a> {
+    pub(crate) slot: u32,
+    pub(crate) ids: &'a [u64],
+    pub(crate) codes: &'a [u8],
+    pub(crate) centroid: &'a [f32],
+    pub(crate) centroid_norm: f32,
+}
+
+/// The query-only inputs shared by every leaf of one scan.
+pub(crate) struct ScanQuery<'a> {
+    pub(crate) query: &'a [f32],
+    pub(crate) q_norm: f32,
+    pub(crate) metric: &'a chroma_distance::DistanceFunction,
+    pub(crate) keep: usize,
+}
+
+/// Norm of a vector, summed in index order exactly as every scorer does.
+pub(crate) fn norm(v: &[f32]) -> f32 {
+    v.iter().map(|x| x * x).sum::<f32>().sqrt()
+}
+
+/// One scan thread's state: its shortlist, work counters and the scratch
+/// buffers it reuses for every leaf.
+struct Worker {
+    shortlist: Shortlist,
+    work: ChunkWork,
+    residual: Vec<f32>,
+    distances: Vec<f32>,
+}
+impl Worker {
+    fn new(keep: usize) -> Self {
+        Self { shortlist: Shortlist::new(keep), work: ChunkWork::default(), residual: vec![], distances: vec![] }
+    }
+    fn scan(&mut self, q: &ScanQuery, leaf: &LeafInput) -> Result<()> {
+        let dim = q.query.len();
+        self.residual.clear();
+        self.residual.extend(q.query.iter().zip(leaf.centroid).map(|(q, c)| q - c));
+        let dot = leaf.centroid.iter().zip(q.query).map(|(c, q)| c * q).sum();
+        let qq = QuantizedQuery::new(&self.residual, Code::<1>::packed_len(dim), leaf.centroid_norm, dot, q.q_norm);
+        let n = leaf.ids.len();
+        // The scorer overwrites every slot, so stale values never leak.
+        if self.distances.len() < n {
+            self.distances.resize(n, 0.0);
+        }
+        let distances = &mut self.distances[..n];
+        Code::<1>::distances_quantized_query(leaf.codes, q.metric, &qq, distances);
+        // A non-short-circuiting fold, so the check vectorizes.
+        if distances.iter().fold(false, |bad, d| bad | !d.is_finite()) {
+            return Err("nonfinite saved posting score".to_string());
+        }
+        self.work.leaves += 1;
+        self.work.vectors += n as u64;
+        self.work.posting_bytes_scanned += leaf.codes.len() as u64 + n as u64 * 8;
+        // Most vectors score above the cutoff. A plain float `>` against the
+        // cutoff distance implies the total order's "greater" for finite
+        // values, so a block of eight with no score at or below it is skipped
+        // whole; any other block goes through the exact admission test.
+        const BLOCK: usize = 8;
+        for (b, block) in distances.chunks(BLOCK).enumerate() {
+            let cut = self.shortlist.cutoff_distance();
+            if block.iter().fold(false, |any, &d| any | !(d > cut)) {
+                let first = b * BLOCK;
+                for (o, (&id, &distance)) in leaf.ids[first..].iter().zip(block).enumerate() {
+                    if self.shortlist.admits(distance, id) {
+                        let ordinal = (first + o) as u32;
+                        self.shortlist.push(Candidate { id, distance, slot: leaf.slot, ordinal });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    fn merge(mut self, other: Worker) -> Worker {
+        self.work.add(&other.work);
+        self.shortlist.merge(other.shortlist);
+        self
+    }
+}
+
+/// Requests with fewer vectors than this scan on the calling thread: waking
+/// the scan pool costs more than it saves.
+pub(crate) const PARALLEL_MIN_VECTORS: usize = 16 * 1024;
+
+/// Score every leaf's 1-bit codes and return the best `keep` candidates
+/// under the (distance, ID) order, plus the work done. Large requests split
+/// their leaves across `pool`; the result does not depend on the split.
+pub(crate) fn score_leaves(
+    pool: &rayon::ThreadPool,
+    q: &ScanQuery,
+    leaves: &[LeafInput],
+) -> Result<(Vec<Candidate>, ChunkWork)> {
+    let vectors: usize = leaves.iter().map(|l| l.ids.len()).sum();
+    let threads = pool.current_num_threads();
+    let worker = if threads <= 1 || vectors < PARALLEL_MIN_VECTORS || leaves.len() < 2 {
+        let mut w = Worker::new(q.keep);
+        for leaf in leaves {
+            w.scan(q, leaf)?;
+        }
+        w
+    } else {
+        // Rayon splits the leaves adaptively and steals work, so a thread
+        // that finishes early takes leaves from a busy one. Each split keeps
+        // its own worker; the floor on split size bounds how many workers,
+        // scratch buffers and merges a request creates.
+        let min_len = leaves.len().div_ceil(threads * 4).max(1);
+        pool.install(|| {
+            leaves
+                .par_iter()
+                .with_min_len(min_len)
+                .try_fold(
+                    || Worker::new(q.keep),
+                    |mut w, leaf| {
+                        w.scan(q, leaf)?;
+                        Ok::<_, String>(w)
+                    },
+                )
+                .try_reduce(|| Worker::new(q.keep), |a, b| Ok(a.merge(b)))
+        })?
+    };
+    Ok((worker.shortlist.finish(), worker.work))
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScanRequest {
     /// Query values as raw float bits, so the owner scores the same numbers.
@@ -149,8 +343,15 @@ pub enum FullVectors {
     Store(BTreeMap<u64, Arc<VectorStoreReader>>),
 }
 
+/// A decoded posting list and the norm of its scoring centroid, which every
+/// query against the leaf needs.
+struct LeafPosting {
+    list: SavedPostingList,
+    centroid_norm: f32,
+}
+
 struct Slot {
-    value: OnceLock<Arc<SavedPostingList>>,
+    value: OnceLock<Arc<LeafPosting>>,
     fill: Mutex<()>,
 }
 
@@ -212,12 +413,15 @@ impl ScanEngine {
     /// Fetch, verify and decode a missing posting list once, even when several
     /// queries want it at the same time. Past the byte budget the list is
     /// still returned but not kept.
-    fn fill(&self, leaf: u128, slot: &Slot) -> Result<(Arc<SavedPostingList>, bool)> {
+    fn fill(&self, leaf: u128, slot: &Slot) -> Result<(Arc<LeafPosting>, bool)> {
         let _filling = slot.fill.lock().map_err(|_| "posting fill lock poisoned")?;
         if let Some(p) = slot.value.get() {
             return Ok((p.clone(), false));
         }
-        let posting = Arc::new(self.reader.posting_list(leaf)?);
+        let list = self.reader.posting_list(leaf)?;
+        // v2 postings carry their leaf centroid; v1 falls back to routing.
+        let centroid_norm = norm(list.scoring_centroid(&self.reader)?);
+        let posting = Arc::new(LeafPosting { list, centroid_norm });
         let bytes = self.reader.posting_object_bytes(leaf).unwrap_or(0);
         if self.cached_bytes.fetch_add(bytes, Ordering::Relaxed) + bytes <= self.budget_bytes {
             let _ = slot.value.set(posting.clone());
@@ -242,7 +446,7 @@ impl ScanEngine {
         if rerank > 0 && self.vectors.is_none() {
             return Err("rerank needs the full-vector corpus".into());
         }
-        let mut postings: Vec<Option<Arc<SavedPostingList>>> = Vec::with_capacity(leaves.len());
+        let mut postings: Vec<Option<Arc<LeafPosting>>> = Vec::with_capacity(leaves.len());
         let mut misses = vec![];
         for (i, leaf) in leaves.iter().enumerate() {
             let slot = self.slots.get(leaf).ok_or("leaf is not served by this process")?;
@@ -260,7 +464,7 @@ impl ScanEngine {
         }
         if !misses.is_empty() {
             let t = Instant::now();
-            let fetched: Vec<Result<(Arc<SavedPostingList>, bool)>> = self
+            let fetched: Vec<Result<(Arc<LeafPosting>, bool)>> = self
                 .fetch_pool
                 .install(|| misses.par_iter().map(|(_, leaf, slot)| self.fill(*leaf, slot)).collect());
             for ((i, leaf, _), result) in misses.iter().zip(fetched) {
@@ -276,62 +480,27 @@ impl ScanEngine {
             timing.fetch_wait = t.elapsed().as_nanos() as u64;
         }
         let t = Instant::now();
-        let dim = query.len();
-        let q_norm = query.iter().map(|x| x * x).sum::<f32>().sqrt();
         let metric = self.reader.metric();
         let keep = k.checked_mul(rerank.max(1)).ok_or("rerank size overflow")?;
-        // Leaves are split into a few chunks per scan thread; each chunk scores
-        // its leaves in order and trims to the shortlist size as it goes.
-        let threads = self.scan_pool.current_num_threads();
-        let chunk = leaves.len().div_ceil(threads * 2).max(1);
-        let slots: Vec<usize> = (0..leaves.len()).collect();
-        let scored: Vec<Result<(Vec<Candidate>, ChunkWork)>> = self.scan_pool.install(|| {
-            slots
-                .par_chunks(chunk)
-                .map(|chunk_slots| {
-                    let mut out = Vec::with_capacity(keep * 2);
-                    let mut cw = ChunkWork::default();
-                    let mut distances = vec![];
-                    for &slot in chunk_slots {
-                        let p = postings[slot].as_ref().expect("every leaf is resolved above");
-                        // v2 postings carry their leaf centroid; v1 falls back to routing.
-                        let centroid = p.scoring_centroid(&self.reader)?;
-                        let residual: Vec<_> = query.iter().zip(centroid).map(|(q, c)| q - c).collect();
-                        let norm = centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
-                        let dot = centroid.iter().zip(query).map(|(c, q)| c * q).sum();
-                        let qq = QuantizedQuery::new(&residual, Code::<1>::packed_len(dim), norm, dot, q_norm);
-                        distances.clear();
-                        distances.resize(p.ids.len(), 0.0);
-                        Code::<1>::distances_quantized_query(&p.codes, metric, &qq, &mut distances);
-                        if distances.iter().any(|d| !d.is_finite()) {
-                            return Err("nonfinite saved posting score".to_string());
-                        }
-                        cw.leaves += 1;
-                        cw.vectors += p.ids.len() as u64;
-                        cw.posting_bytes_scanned += p.codes.len() as u64 + p.ids.len() as u64 * 8;
-                        out.extend(p.ids.iter().zip(&distances).enumerate().map(|(ordinal, (id, d))| Candidate {
-                            id: *id,
-                            distance: *d,
-                            slot: slot as u32,
-                            ordinal: ordinal as u32,
-                        }));
-                        if out.len() >= keep * 2 {
-                            trim(&mut out, keep);
-                        }
-                    }
-                    trim(&mut out, keep);
-                    Ok((out, cw))
+        let inputs = postings
+            .iter()
+            .enumerate()
+            .map(|(slot, p)| {
+                let p = p.as_ref().expect("every leaf is resolved above");
+                Ok(LeafInput {
+                    slot: slot as u32,
+                    ids: &p.list.ids,
+                    codes: &p.list.codes,
+                    centroid: p.list.scoring_centroid(&self.reader)?,
+                    centroid_norm: p.centroid_norm,
                 })
-                .collect()
-        });
-        let mut shortlist = Vec::with_capacity(keep * scored.len());
-        for result in scored {
-            let (part, cw) = result?;
-            work.leaves += cw.leaves;
-            work.vectors += cw.vectors;
-            work.posting_bytes_scanned += cw.posting_bytes_scanned;
-            shortlist.extend(part);
-        }
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let scan_query = ScanQuery { query, q_norm: norm(query), metric, keep };
+        let (mut shortlist, cw) = score_leaves(&self.scan_pool, &scan_query, &inputs)?;
+        work.leaves += cw.leaves;
+        work.vectors += cw.vectors;
+        work.posting_bytes_scanned += cw.posting_bytes_scanned;
         timing.scan = t.elapsed().as_nanos() as u64;
         let t = Instant::now();
         trim(&mut shortlist, keep);
