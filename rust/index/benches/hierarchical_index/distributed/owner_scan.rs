@@ -611,8 +611,14 @@ impl ScanEngine {
                             .iter()
                             .map(|&i| (leaves[shortlist[i].slot as usize], shortlist[i].ordinal))
                             .collect();
+                        // with_rows checks every row against the store's dimensions.
+                        if store.dimensions() != query.len() {
+                            return Err("stored vector dimension differs from the query".into());
+                        }
                         let before = store.counters();
-                        let rows = store.get_many(&keys)?;
+                        store.with_rows(&keys, |k, row| {
+                            shortlist[members[k]].distance = metric.distance(query, row);
+                        })?;
                         let after = store.counters();
                         work.rerank_blocks_loaded += after.blocks_loaded - before.blocks_loaded;
                         work.rerank_bytes_loaded += after.bytes_loaded - before.bytes_loaded;
@@ -621,13 +627,7 @@ impl ScanEngine {
                         work.rerank_blocks_touched += touched;
                         work.rerank_cold_bytes_estimate +=
                             touched * after.bytes_loaded / after.blocks_loaded.max(1);
-                        for (&i, row) in members.iter().zip(&rows) {
-                            if row.len() != query.len() {
-                                return Err("stored vector dimension differs from the query".into());
-                            }
-                            shortlist[i].distance = metric.distance(query, row);
-                            work.rerank_row_bytes += row.len() as u64 * 4;
-                        }
+                        work.rerank_row_bytes += keys.len() as u64 * query.len() as u64 * 4;
                     }
                 }
             }

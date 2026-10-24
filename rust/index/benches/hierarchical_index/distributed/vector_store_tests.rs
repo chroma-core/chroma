@@ -88,6 +88,34 @@ fn round_trip_in_arbitrary_order() {
 }
 
 #[test]
+fn with_rows_visits_each_key_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (location, reference) = write(dir.path(), 40 * 1024);
+    let reader = VectorStoreReader::open(&location, &reference, 64 * 1024 * 1024).unwrap();
+    // Small blocks hold several leaves, so some keys miss their row hint and
+    // fall back to a search; repeats must each be visited.
+    let mut keys = shuffled(all_keys(), 3);
+    keys.extend([(10u128, 19u32), (3, 0), (10, 19)]);
+    for _ in 0..2 {
+        let mut seen = vec![0usize; keys.len()];
+        reader
+            .with_rows(&keys, |i, row| {
+                seen[i] += 1;
+                let (leaf, position) = keys[i];
+                assert_eq!(row, &*vector(leaf, position as usize), "{leaf}/{position}");
+            })
+            .unwrap();
+        assert!(seen.iter().all(|&n| n == 1), "{seen:?}");
+    }
+    let mut called = false;
+    let err = reader
+        .with_rows(&[(3, 1), (10, 20)], |_, _| called = true)
+        .unwrap_err();
+    assert!(err.contains("missing vector"), "{err}");
+    assert!(!called, "visitor ran before the missing key was reported");
+}
+
+#[test]
 fn missing_keys_are_errors() {
     let dir = tempfile::tempdir().unwrap();
     let (location, reference) = write(dir.path(), usize::MAX);
@@ -216,4 +244,273 @@ fn cache_capacity_counts_blocks() {
     assert_eq!(block_cache_capacity(1 << 30, 1 << 20), 1024);
     assert_eq!(block_cache_capacity(1 << 30, 3 << 20), 1024);
     assert_eq!(block_cache_capacity(0, 256 * 1024), 1);
+}
+
+/// Production-shaped warm and cold rerank timings. Run with
+/// `cargo test --release ... vector_store::tests::rerank_microbench -- --ignored --nocapture`.
+/// Env: `BENCH_LEAVES` (default 300), `BENCH_LEAF_VECTORS` (1450).
+#[test]
+#[ignore]
+fn rerank_microbench() {
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use std::time::Instant;
+    let env = |name: &str, default: usize| {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    };
+    let n_leaves = env("BENCH_LEAVES", 300);
+    let per_leaf = env("BENCH_LEAF_VECTORS", 1450);
+    let dir = tempfile::tempdir_in("/private/tmp").unwrap();
+    let location = VectorStoreLocation::Local(dir.path().to_path_buf());
+    let t = Instant::now();
+    let reference = write_owner_vectors(
+        &location,
+        1,
+        DIM,
+        DEFAULT_VECTOR_BLOCK_SIZE_BYTES,
+        (0..n_leaves as u128).map(|leaf| {
+            let leaf = leaf * 7919 + 3;
+            let vs = (0..per_leaf).map(|i| vector(leaf, i)).collect();
+            (leaf, vs)
+        }),
+    )
+    .unwrap();
+    let blocks = std::fs::read_dir(dir.path().join("vectors/owner-1/block"))
+        .unwrap()
+        .count();
+    eprintln!(
+        "wrote {} rows, {blocks} block objects in {:.1}s",
+        reference.rows,
+        t.elapsed().as_secs_f64()
+    );
+    let reader = VectorStoreReader::open(&location, &reference, 32 << 30).unwrap();
+    // 200 candidates in 30 leaves at random ordinals, as a rerank shortlist.
+    let mut rng = StdRng::seed_from_u64(7);
+    let queries: Vec<Vec<(u128, u32)>> = (0..50)
+        .map(|_| {
+            let leaves: Vec<u128> = (0..30)
+                .map(|_| rng.gen_range(0..n_leaves as u128) * 7919 + 3)
+                .collect();
+            (0..200)
+                .map(|_| {
+                    (
+                        leaves[rng.gen_range(0..leaves.len())],
+                        rng.gen_range(0..per_leaf as u32),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    // Best of several passes over all queries: the machine may be shared.
+    let time = |label: &str, f: &mut dyn FnMut(&[(u128, u32)])| {
+        let passes = if label.starts_with("cold") { 1 } else { 7 };
+        let mut best = f64::MAX;
+        for _ in 0..passes {
+            let t = Instant::now();
+            for keys in &queries {
+                f(keys);
+            }
+            best = best.min(t.elapsed().as_secs_f64() * 1e6 / queries.len() as f64);
+        }
+        eprintln!("{label:<40} {best:8.1} us/call");
+    };
+    let query: Vec<f32> = (0..DIM).map(|d| d as f32 / DIM as f32).collect();
+    let metric = chroma_distance::DistanceFunction::Euclidean;
+    let check: Vec<Vec<f32>> = queries
+        .iter()
+        .map(|keys| {
+            keys.iter()
+                .map(|&(l, p)| {
+                    let v = vector(l, p as usize);
+                    v.iter().zip(&query).map(|(a, b)| (a - b) * (a - b)).sum()
+                })
+                .collect()
+        })
+        .collect();
+    let before = reader.counters();
+    time("cold get_many (local fs)", &mut |keys| {
+        reader.get_many(keys).unwrap();
+    });
+    let cold = reader.counters();
+    eprintln!(
+        "cold: {} blocks loaded for {} calls ({:.1}/call)",
+        cold.blocks_loaded - before.blocks_loaded,
+        queries.len(),
+        (cold.cache_misses + cold.cache_hits - before.cache_misses - before.cache_hits) as f64
+            / queries.len() as f64
+    );
+    time("warm get_many", &mut |keys| {
+        reader.get_many(keys).unwrap();
+    });
+    time("warm with_rows + simd distances", &mut |keys| {
+        let mut d = 0f32;
+        reader
+            .with_rows(keys, |_, r| d += metric.distance(&query, r))
+            .unwrap();
+        std::hint::black_box(d);
+    });
+    time("warm get_many + simd distances", &mut |keys| {
+        let rows = reader.get_many(keys).unwrap();
+        let d: f32 = rows.iter().map(|r| metric.distance(&query, r)).sum();
+        std::hint::black_box(d);
+    });
+    time("warm plan + load_blocks only", &mut |keys| {
+        let mut plan = reader.plan(keys);
+        reader.load_blocks(&mut plan).unwrap();
+        std::hint::black_box(plan);
+    });
+    time("warm with_rows, no-op visitor", &mut |keys| {
+        reader
+            .with_rows(keys, |_, r| {
+                std::hint::black_box(r);
+            })
+            .unwrap();
+    });
+    time("200 BlockIndex::locate", &mut |keys| {
+        for &k in keys {
+            std::hint::black_box(reader.index.locate(k));
+        }
+    });
+    time("200 leaf_prefix", &mut |keys| {
+        for &(l, _) in keys {
+            std::hint::black_box(leaf_prefix(l));
+        }
+    });
+    {
+        let mut plan = reader.plan(&queries[0]);
+        reader.load_blocks(&mut plan).unwrap();
+        let plan = plan;
+        time("fetch distinct blocks (cached, async)", &mut |_| {
+            runtime().block_on(async {
+                let r = reader.blockfile().await.unwrap();
+                for id in &plan.block_ids {
+                    std::hint::black_box(r.fetch_block(*id).await.unwrap());
+                }
+            });
+        });
+        eprintln!("  ({} distinct blocks)", plan.blocks.len());
+        time("200 Block::get on loaded plan", &mut |_| {
+            for &(i, p, b, _) in &plan.keys {
+                std::hint::black_box(
+                    plan.blocks[b]
+                        .as_ref()
+                        .unwrap()
+                        .get::<u32, &[f32]>(&plan.prefixes[p], queries[0][i].1),
+                );
+            }
+        });
+    }
+    {
+        // Per-phase costs across all queries, so CPU caches are as cold as
+        // in a real query stream (the single-plan timings above are hot).
+        let plans: Vec<RowPlan> = queries
+            .iter()
+            .map(|keys| {
+                let mut plan = reader.plan(keys);
+                reader.load_blocks(&mut plan).unwrap();
+                plan
+            })
+            .collect();
+        let mut q = 0;
+        time("phase: sort + locate + prefixes", &mut |keys| {
+            let mut order: Vec<usize> = (0..keys.len()).collect();
+            order.sort_unstable_by_key(|&i| keys[i]);
+            for &i in &order {
+                std::hint::black_box(reader.index.locate(keys[i]));
+            }
+            for _ in 0..30 {
+                std::hint::black_box(leaf_prefix(keys[0].0));
+            }
+        });
+        time("phase: sync cache probes", &mut |_| {
+            let plan = &plans[q % plans.len()];
+            q += 1;
+            let mut fresh = RowPlan {
+                keys: Vec::new(),
+                prefixes: Vec::new(),
+                block_ids: plan.block_ids.clone(),
+                blocks: Vec::new(),
+            };
+            reader.load_blocks(&mut fresh).unwrap();
+            std::hint::black_box(fresh);
+        });
+        time("phase: hinted row lookups", &mut |_| {
+            let plan = &plans[q % plans.len()];
+            q += 1;
+            for &(_, p, b, hint) in &plan.keys {
+                std::hint::black_box(
+                    plan.blocks[b]
+                        .as_ref()
+                        .unwrap()
+                        .get_with_hint::<u32, &[f32]>(&plan.prefixes[p], 0, hint),
+                );
+            }
+        });
+        time("phase: hinted lookups + simd distance", &mut |keys| {
+            let plan = &plans[q % plans.len()];
+            q += 1;
+            let mut d = 0f32;
+            for &(i, p, b, hint) in &plan.keys {
+                let row = plan.blocks[b]
+                    .as_ref()
+                    .unwrap()
+                    .get_with_hint::<u32, &[f32]>(&plan.prefixes[p], keys[i].1, hint)
+                    .unwrap_or(&[]);
+                d += metric.distance(&query, &row[..query.len().min(row.len())]);
+            }
+            std::hint::black_box(d);
+        });
+        let hinted: usize = plans
+            .iter()
+            .map(|p| p.keys.iter().filter(|k| k.3 != usize::MAX).count())
+            .sum();
+        eprintln!(
+            "  {:.0}% of keys have a row hint",
+            100.0 * hinted as f64 / (plans.len() * 200) as f64
+        );
+    }
+    reader.clear_cache().unwrap();
+    time("cold with_rows after clear_cache", &mut |keys| {
+        reader
+            .with_rows(keys, |_, r| {
+                std::hint::black_box(r);
+            })
+            .unwrap();
+    });
+    time("block_on(empty)", &mut |_| {
+        runtime().block_on(async {});
+    });
+    time("block_on(open reader)", &mut |_| {
+        runtime().block_on(async {
+            std::hint::black_box(reader.blockfile().await.unwrap());
+        });
+    });
+    time("open + sequential get", &mut |keys| {
+        runtime().block_on(async {
+            let r = reader.blockfile().await.unwrap();
+            for &(l, p) in keys {
+                std::hint::black_box(r.get(&leaf_prefix(l), p).await.unwrap());
+            }
+        });
+    });
+    time("open + get same key x200", &mut |keys| {
+        runtime().block_on(async {
+            let r = reader.blockfile().await.unwrap();
+            let (l, p) = keys[0];
+            let prefix = leaf_prefix(l);
+            for _ in keys {
+                std::hint::black_box(r.get(&prefix, p).await.unwrap());
+            }
+        });
+    });
+    // Results stay exact.
+    for (keys, want) in queries.iter().zip(&check) {
+        let rows = reader.get_many(keys).unwrap();
+        for (row, w) in rows.iter().zip(want) {
+            let d: f32 = row.iter().zip(&query).map(|(a, b)| (a - b) * (a - b)).sum();
+            assert_eq!(d.to_bits(), w.to_bits());
+        }
+    }
 }

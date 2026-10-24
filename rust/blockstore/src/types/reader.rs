@@ -181,6 +181,35 @@ impl<
         }
     }
 
+    /// Every Arrow block in key order with the first `(prefix, key)` it may
+    /// hold, from the root's sparse index; block `i` holds the keys in
+    /// `[start_i, start_{i+1})`, and the first block's start is `None`. Lets a
+    /// caller locate keys itself and fetch blocks with `fetch_block`. Empty
+    /// for the memory backend.
+    pub fn block_index(&self) -> Vec<(Option<(String, KeyWrapper)>, uuid::Uuid)> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(_) => Vec::new(),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.block_index(),
+        }
+    }
+
+    /// Loads an Arrow block through the shared block cache without pinning it
+    /// in this reader. Unlike `get`, the block is freed when the caller drops
+    /// it and the cache evicts it, so a long-lived reader stays bounded.
+    /// `Ok(None)` for the memory backend.
+    pub async fn fetch_block(
+        &self,
+        block_id: uuid::Uuid,
+    ) -> Result<Option<crate::arrow::block::Block>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(_) => Ok(None),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader
+                .fetch_block(block_id)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+        }
+    }
+
     /// Number of Arrow blocks whose key range overlaps this prefix.
     /// Returns `0` for `MemoryBlockfileReader`.
     pub fn count_blocks_for_prefix(&self, prefix: &str) -> usize {

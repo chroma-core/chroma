@@ -8,7 +8,7 @@ use super::{
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
 use crate::arrow::root::CURRENT_VERSION;
-use crate::arrow::sparse_index::SparseIndexWriter;
+use crate::arrow::sparse_index::{SparseIndexDelimiter, SparseIndexWriter};
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
 use chroma_cache::AysncPartitionedMutex;
@@ -615,6 +615,37 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         // argument used in get_block's transmute.
         let block: &'me Block = unsafe { transmute::<&Block, &Block>(block) };
         block.get_raw::<K, V>(prefix, key)
+    }
+
+    /// Every block in key order with the first key it may hold, from the
+    /// root's sparse index. The first block's start is `None`: it begins
+    /// before every key. Block `i` holds the keys in `[start_i, start_{i+1})`.
+    pub(crate) fn block_index(&self) -> Vec<(Option<(String, KeyWrapper)>, Uuid)> {
+        self.root
+            .sparse_index
+            .data
+            .forward
+            .iter()
+            .map(|(start, value)| {
+                let start = match start {
+                    SparseIndexDelimiter::Start => None,
+                    SparseIndexDelimiter::Key(k) => Some((k.prefix.clone(), k.key.clone())),
+                };
+                (start, value.id)
+            })
+            .collect()
+    }
+
+    /// Loads a block through the block manager's cache without pinning it in
+    /// this reader, so the caller's copy is the only extra reference.
+    pub(crate) async fn fetch_block(&self, block_id: Uuid) -> Result<Option<Block>, GetError> {
+        self.block_manager
+            .get(
+                &self.root.prefix_path,
+                &block_id,
+                StorageRequestPriority::P0,
+            )
+            .await
     }
 
     /// Number of Arrow blocks whose key range overlaps this prefix.
