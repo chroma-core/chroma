@@ -98,7 +98,7 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         resp = self._session.post(self._api_url, json=payload).json()
 
-        if "result" not in resp and "data" not in resp["result"]:
+        if "result" not in resp or "data" not in resp["result"]:
             raise RuntimeError(resp.get("detail", "Unknown error"))
 
         return cast(Embeddings, resp["result"]["data"])
