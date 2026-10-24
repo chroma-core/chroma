@@ -11,7 +11,7 @@ If you don't see your problem listed here, please also search the [Github Issues
 
 ## Embedding dimension mismatch
 
-An error like `InvalidDimensionException: Embedding dimension 384 does not match collection dimensionality 768` means an incoming vector has a different length from the vectors already stored in the collection. Chroma records a collection's dimensionality when its first embedding is stored; later document and query embeddings must have that same number of values.
+Depending on the client path, an error may look like `InvalidDimensionException: Embedding dimension 384 does not match collection dimensionality 768` (the Python API) or `InvalidArgumentError: Collection expecting embedding with dimension of 768, got 384` (the Rust-backed default `PersistentClient`). Both mean an incoming vector has a different length from the vectors already stored in the collection. Chroma records a collection's dimensionality when its first embedding is stored; later document and query embeddings must have that same number of values.
 
 Use the same embedding function, model, and configuration for stored documents and queries. Matching dimensions alone do not make vectors from different models comparable: each model maps text into its own vector space.
 
