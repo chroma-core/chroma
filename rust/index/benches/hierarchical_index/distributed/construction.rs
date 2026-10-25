@@ -21,8 +21,8 @@ use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant};
 
 /// Limit on chained balancing, as in the reference writer: work that a job
-/// triggers (its split children, the leaves its reassignments touch, a parent
-/// that a split overfills) is one level deeper than the job, and work deeper
+/// triggers (the leaves its reassignments and merges touch, a parent that a
+/// split overfills) is one level deeper than the job, and work deeper
 /// than this limit is dropped for the current pass. Every balancing pass
 /// starts its out-of-threshold nodes again at depth 0, so dropped work is
 /// reconsidered after the next batch has changed the tree. Without the limit
@@ -935,8 +935,11 @@ impl OwnerService {
                 )?;
             }
         }
-        cluster.schedule(a, depth + 1)?;
-        cluster.schedule(b, depth + 1)?;
+        // The children inherit this split's depth: splitting a leaf's own
+        // children only refines it and ends after a few halvings. Chains that
+        // travel through reassignments are the ones the limit stops.
+        cluster.schedule(a, depth)?;
+        cluster.schedule(b, depth)?;
         Ok(())
     }
 }
