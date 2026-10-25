@@ -21,8 +21,8 @@ use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant};
 
 /// Limit on chained balancing, as in the reference writer: work that a job
-/// triggers (the leaves its reassignments and merges touch, a parent that a
-/// split overfills) is one level deeper than the job, and work deeper
+/// triggers through moving vectors (the leaves its reassignments and merges
+/// touch) is one level deeper than the job, and work deeper
 /// than this limit is dropped for the current pass. Every balancing pass
 /// starts its out-of-threshold nodes again at depth 0, so dropped work is
 /// reconsidered after the next batch has changed the tree. Without the limit
@@ -2199,7 +2199,10 @@ impl Cluster {
             if self.current_view().value.units.get(&parent.id) == Some(&parent) {
                 self.refresh_boundary_centroid(parent)?;
             }
-            self.schedule(parent, follow_up_depth())?;
+            // A parent overfilled by this replacement splits as part of the
+            // same structural change, bounded by tree height, so it keeps
+            // this job's depth (the reference splits parents without one).
+            self.schedule(parent, current_depth())?;
             Ok(true)
         } else {
             let envelope = self.local.envelope(
@@ -2855,7 +2858,7 @@ impl Cluster {
             .collect::<Vec<_>>();
         if self.install_split(&old, prepared)? {
             for node in refs {
-                self.schedule(node, follow_up_depth())?;
+                self.schedule(node, current_depth())?;
             }
         } else {
             self.enqueue(BalanceJob {
