@@ -263,9 +263,11 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         self.task_type = task_type
         self.dimension = dimension
 
+        from google.api_core.gapic_v1.client_info import ClientInfo
+
         genai.configure(
             api_key=self.api_key,
-            client_options={"headers": {"x-goog-api-client": f"chroma/{__version__}"}},
+            client_info=ClientInfo(user_agent=f"chroma/{__version__}"),
         )
         self._genai = genai
 
@@ -411,9 +413,11 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.model_name = model_name
 
+        from google.api_core.gapic_v1.client_info import ClientInfo
+
         palm.configure(
             api_key=self.api_key,
-            client_options={"headers": {"x-goog-api-client": f"chroma/{__version__}"}},
+            client_info=ClientInfo(user_agent=f"chroma/{__version__}"),
         )
         self._palm = palm
 
