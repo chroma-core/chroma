@@ -746,7 +746,7 @@ func (s *collectionDb) IncrementCompactionFailureCount(collectionID string) erro
 	return nil
 }
 
-// GetDLQFailureCounts returns a map of compaction_failure_count to the number of collections with that count.
+// GetDLQFailureCounts returns a map of compaction_failure_count to the number of live collections with that count.
 // This uses the read replica to minimize overhead on the primary database.
 func (s *collectionDb) GetDLQFailureCounts() (map[int32]int64, error) {
 	type result struct {
@@ -758,6 +758,7 @@ func (s *collectionDb) GetDLQFailureCounts() (map[int32]int64, error) {
 	err := s.read_db.Model(&dbmodel.Collection{}).
 		Select("compaction_failure_count, COUNT(*) as count").
 		Where("compaction_failure_count > 0").
+		Where("is_deleted = ?", false).
 		Group("compaction_failure_count").
 		Find(&results).Error
 
