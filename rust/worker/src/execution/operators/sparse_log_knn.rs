@@ -102,8 +102,10 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
             materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
         // We need the smallest results, so we keep a max heap to track the largest of them
-        // so that it can be replaced if we found a smaller one
-        let mut max_heap = BinaryHeap::with_capacity(self.limit as usize);
+        // so that it can be replaced if we found a smaller one.
+        // `limit` is request-controlled and can be far larger than the number of
+        // logs, so grow the heap lazily instead of preallocating for it.
+        let mut max_heap = BinaryHeap::new();
         for log in &logs {
             if !matches!(
                 log.get_operation(),

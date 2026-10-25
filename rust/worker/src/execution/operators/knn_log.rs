@@ -97,7 +97,9 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
             &self.embedding
         };
 
-        let mut max_heap = BinaryHeap::with_capacity(self.fetch as usize);
+        // `fetch` is request-controlled and can be far larger than the number
+        // of logs, so grow the heap lazily instead of preallocating for it.
+        let mut max_heap = BinaryHeap::new();
 
         for log in &logs {
             if !matches!(
