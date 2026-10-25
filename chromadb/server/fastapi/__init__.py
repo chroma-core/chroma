@@ -232,6 +232,24 @@ class FastAPI(Server):
         if settings.chroma_server_authz_provider:
             self.authz_provider = self._system.require(ServerAuthorizationProvider)
 
+        # Security: warn loudly when authentication is configured but
+        # authorization is not. In this state, every authenticated user has
+        # full access to all tenants' resources — sync_auth_request returns
+        # immediately at the authz check (line ~543), granting all actions.
+        # This is especially dangerous in multi-tenant deployments where an
+        # operator may assume that configuring authn is sufficient for isolation.
+        if self.authn_provider and not self.authz_provider:
+            import logging
+            logging.getLogger("chroma.server").warning(
+                "SECURITY: Authentication is configured "
+                "(chroma_server_authn_provider) but authorization is NOT "
+                "(chroma_server_authz_provider). Every authenticated user "
+                "will have full access to ALL tenants' resources. "
+                "Configure chroma_server_authz_provider for multi-tenant "
+                "isolation. See: "
+                "https://docs.trychroma.com/deployment/auth"
+            )
+
         self.router = ChromaAPIRouter()
 
         self.setup_v1_routes()
