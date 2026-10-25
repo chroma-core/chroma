@@ -6,6 +6,7 @@ from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
+from chromadb.errors import InvalidArgumentError
 import pytest
 import tempfile
 import os
@@ -132,7 +133,7 @@ def test_http_client(http_api: ClientAPI) -> None:
 def test_http_client_with_inconsistent_host_settings(
     http_api_factory: HttpAPIFactory,
 ) -> None:
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         http_api_factory(settings=Settings(chroma_server_host="127.0.0.1"))
 
     assert (
@@ -145,7 +146,7 @@ def test_http_client_with_inconsistent_host_settings(
 def test_http_client_with_inconsistent_port_settings(
     http_api_factory: HttpAPIFactory,
 ) -> None:
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         http_api_factory(
             port=8002,
             settings=Settings(

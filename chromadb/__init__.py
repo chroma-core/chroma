@@ -47,6 +47,7 @@ from chromadb.api.types import (
     BoolInvertedIndexConfig,
     ConditionalCommitResult,
 )
+from chromadb.errors import InvalidArgumentError
 
 # Import Search API components
 from chromadb.execution.expression.plan import Search
@@ -112,7 +113,6 @@ from chromadb.types import CloudClientArg
 logger = logging.getLogger(__name__)
 
 __settings = Settings()
-
 
 
 # Workaround to deal with Colab's old sqlite3 version
@@ -283,7 +283,7 @@ def HttpClient(
         ClientAPI: A configured client instance.
 
     Raises:
-        ValueError: If settings specify a different host or port.
+        InvalidArgumentError: If settings specify a different host or port.
     """
 
     if settings is None:
@@ -298,12 +298,12 @@ def HttpClient(
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     if settings.chroma_server_host and settings.chroma_server_host != host:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
         )
     settings.chroma_server_host = host
     if settings.chroma_server_http_port and settings.chroma_server_http_port != port:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Chroma server http port provided in settings[{settings.chroma_server_http_port}] is different to the one provided in HttpClient: [{port}]"
         )
     settings.chroma_server_http_port = port
@@ -340,7 +340,7 @@ async def AsyncHttpClient(
         AsyncClientAPI: A configured async client instance.
 
     Raises:
-        ValueError: If settings specify a different host or port.
+        InvalidArgumentError: If settings specify a different host or port.
     """
 
     if settings is None:
@@ -355,12 +355,12 @@ async def AsyncHttpClient(
 
     settings.chroma_api_impl = "chromadb.api.async_fastapi.AsyncFastAPI"
     if settings.chroma_server_host and settings.chroma_server_host != host:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
         )
     settings.chroma_server_host = host
     if settings.chroma_server_http_port and settings.chroma_server_http_port != port:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Chroma server http port provided in settings[{settings.chroma_server_http_port}] is different to the one provided in HttpClient: [{port}]"
         )
     settings.chroma_server_http_port = port
@@ -396,7 +396,7 @@ def CloudClient(
         ClientAPI: A configured client instance.
 
     Raises:
-        ValueError: If no API key is provided or available in the environment.
+        InvalidArgumentError: If no API key is provided or available in the environment.
     """
 
     required_args = [
@@ -410,7 +410,7 @@ def CloudClient(
 
     missing_args = [arg for arg in required_args if arg.value is None]
     if missing_args:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Missing required arguments: {', '.join([arg.name for arg in missing_args])}. "
             f"Please provide them or set the environment variables: {', '.join([arg.env_var for arg in missing_args])}"
         )
