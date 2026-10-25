@@ -100,7 +100,7 @@ class TestONNXMiniLM_L6_V2:
         ef = ONNXMiniLM_L6_V2()
         assert ef.max_tokens() == 256  # Default for this model
 
-    @patch("httpx.stream")
+    @patch("httpx2.stream")
     def test_download_functionality(self, mock_stream: MagicMock) -> None:
         """Test the model download functionality with mocking."""
         # Setup mock response
