@@ -13,6 +13,8 @@ pub enum MetadataError {
     QueryError(#[from] sea_query::error::Error),
     #[error("Error executing query: {0}")]
     SqlxError(#[from] WrappedSqlxError),
+    #[error("Unsupported metadata value type: {0}")]
+    UnsupportedValueType(&'static str),
 }
 
 impl ChromaError for MetadataError {
@@ -20,6 +22,7 @@ impl ChromaError for MetadataError {
         match self {
             MetadataError::QueryError(_) => chroma_error::ErrorCodes::Internal,
             MetadataError::SqlxError(e) => e.code(),
+            MetadataError::UnsupportedValueType(_) => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -30,7 +33,7 @@ fn construct_upsert_metadata_stmt<
 >(
     id: Id,
     metadata: Metadata,
-) -> Result<InsertStatement, sea_query::error::Error> {
+) -> Result<InsertStatement, MetadataError> {
     let mut stmt = Query::insert();
     stmt.into_table(Table::table_name())
         .columns([
@@ -86,15 +89,17 @@ fn construct_upsert_metadata_stmt<
                 bool::null().into(),
             ],
             MetadataValue::SparseVector(_) => {
-                todo!("Sparse vector is not yet supported for local")
+                return Err(MetadataError::UnsupportedValueType(
+                    "Sparse vector metadata is not supported in local SQLite",
+                ));
             }
-            // Array types are routed to the separate embedding_metadata_array
-            // table and should never appear here.
             MetadataValue::BoolArray(_)
             | MetadataValue::IntArray(_)
             | MetadataValue::FloatArray(_)
             | MetadataValue::StringArray(_) => {
-                unreachable!("Array metadata values are written to embedding_metadata_array")
+                return Err(MetadataError::UnsupportedValueType(
+                    "Array metadata values cannot be written to scalar metadata table",
+                ));
             }
         })?;
     }
@@ -372,3 +377,51 @@ pub fn get_embeddings_queue_topic_name(
         log_tenant, log_topic_namespace, collection_id
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::table;
+    use chroma_error::ChromaError;
+    use chroma_types::{MetadataValue, SparseVector};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_construct_upsert_metadata_stmt_unsupported_array() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "arr".to_string(),
+            MetadataValue::StringArray(vec!["hello".to_string()]),
+        );
+        let res = construct_upsert_metadata_stmt::<table::CollectionMetadata, _>("col_id", metadata);
+        match res {
+            Err(MetadataError::UnsupportedValueType(_)) => {
+                assert_eq!(res.unwrap_err().code(), chroma_error::ErrorCodes::InvalidArgument);
+            }
+            _ => panic!("Expected UnsupportedValueType error"),
+        }
+    }
+
+    #[test]
+    fn test_construct_upsert_metadata_stmt_unsupported_sparse_vector() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "sparse".to_string(),
+            MetadataValue::SparseVector(SparseVector {
+                indices: vec![0],
+                values: vec![1.0],
+                tokens: None,
+            }),
+        );
+        let res = construct_upsert_metadata_stmt::<table::CollectionMetadata, _>("col_id", metadata);
+        match res {
+            Err(MetadataError::UnsupportedValueType(_)) => {
+                assert_eq!(res.unwrap_err().code(), chroma_error::ErrorCodes::InvalidArgument);
+            }
+            _ => panic!("Expected UnsupportedValueType error"),
+        }
+    }
+}
+
+
+
