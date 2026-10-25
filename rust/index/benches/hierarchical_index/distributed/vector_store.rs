@@ -70,8 +70,16 @@ pub const SEGMENTED_LEAF_ORDINAL_LAYOUT: &str = "arrow-blockfile-leaf-ordinal-se
 
 /// Default number of segments a save writes in parallel, overridden by
 /// `SPANN_VECTOR_STORE_WRITERS` (1 through 256). One writer writes the
-/// single-blockfile layout.
-pub const DEFAULT_VECTOR_STORE_WRITERS: usize = 32;
+/// single-blockfile layout. Writing 6 GB to S3 from an r6i.16xlarge takes
+/// 76 MB/s with 1 writer, 305 MB/s with 4 and about 850 MB/s with 16 or 32;
+/// at 32 and 64 writers S3 sometimes answers 429 SlowDown, since every
+/// segment writes under the owner's one prefix.
+pub const DEFAULT_VECTOR_STORE_WRITERS: usize = 16;
+
+/// Attempts per segment. A failed segment (for example an S3 429 SlowDown
+/// during a flush) is written again from its first leaf to a new blockfile;
+/// the failed attempt's objects stay in storage unreferenced.
+const SEGMENT_ATTEMPTS: usize = 4;
 
 pub fn vector_store_writers() -> Result<usize, String> {
     match std::env::var("SPANN_VECTOR_STORE_WRITERS") {
@@ -507,14 +515,25 @@ pub(super) fn write_owner_vectors_parallel_chunked(
                 let range = &leaves[range.clone()];
                 let load = &load;
                 scope.spawn(move || {
-                    write_segment(
-                        location,
-                        owner,
-                        dimensions,
-                        max_block_size_bytes,
-                        chunk_bytes,
-                        range.iter().map(load),
-                    )
+                    let mut attempt = 1;
+                    loop {
+                        let written = write_segment(
+                            location,
+                            owner,
+                            dimensions,
+                            max_block_size_bytes,
+                            chunk_bytes,
+                            range.iter().map(load),
+                        );
+                        match written {
+                            Err(e) if attempt < SEGMENT_ATTEMPTS => {
+                                eprintln!("vector store segment attempt {attempt} failed, retrying: {e}");
+                                std::thread::sleep(std::time::Duration::from_secs(1 << attempt));
+                                attempt += 1;
+                            }
+                            written => break written,
+                        }
+                    }
                 })
             })
             .collect();
