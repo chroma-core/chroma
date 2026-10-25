@@ -128,6 +128,7 @@ async fn debit_posts_priced_amount_with_query_class() {
                 .header("x-chroma-token", "key-1")
                 .json_body(json!({
                     "tenant": "tenant-1",
+                    "database_name": "FOUNDATION",
                     "spend_class": "query",
                     "source": "agent_query",
                     "amount_micros": 4_800_000_i64,
@@ -141,7 +142,7 @@ async fn debit_posts_priced_amount_with_query_class() {
     let client = BudgetClient::new(&server.base_url(), reqwest::Client::new());
     let run = vec![usage(PLANNER, 1_000_000, 100_000)];
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-1", PLANNER, &run)
+        .debit_agent_query("key-1", "tenant-1", "FOUNDATION", "trace-1", PLANNER, &run)
         .await;
 
     card.assert_async().await;
@@ -171,10 +172,10 @@ async fn card_is_cached_across_debits() {
     let client = BudgetClient::new(&server.base_url(), reqwest::Client::new());
     let run = vec![usage(PLANNER, 1_000, 1_000)];
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-a", PLANNER, &run)
+        .debit_agent_query("key-1", "tenant-1", "FOUNDATION", "trace-a", PLANNER, &run)
         .await;
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-b", PLANNER, &run)
+        .debit_agent_query("key-1", "tenant-1", "FOUNDATION", "trace-b", PLANNER, &run)
         .await;
 
     card.assert_calls_async(1).await;
@@ -200,7 +201,7 @@ async fn zero_amount_skips_the_post() {
 
     let client = BudgetClient::new(&server.base_url(), reqwest::Client::new());
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-z", PLANNER, &[])
+        .debit_agent_query("key-1", "tenant-1", "FOUNDATION", "trace-z", PLANNER, &[])
         .await;
 
     card.assert_calls_async(1).await;
@@ -213,7 +214,7 @@ async fn unreachable_sync_never_panics() {
     let client = BudgetClient::new("http://127.0.0.1:9", reqwest::Client::new());
     let run = vec![usage(PLANNER, 1_000_000, 0)];
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-x", PLANNER, &run)
+        .debit_agent_query("key-1", "tenant-1", "FOUNDATION", "trace-x", PLANNER, &run)
         .await;
 }
 

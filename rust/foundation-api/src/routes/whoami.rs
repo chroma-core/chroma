@@ -249,7 +249,7 @@ pub(super) fn validate_foundation_name(name: &str) -> Result<(), String> {
 /// parser nothing to rewrite: the only segments it drops are exactly `.` and
 /// `..`, which the ends rule refuses, and every separator and escape it honours
 /// falls outside the allowed set.
-fn validate_path_tenant(name: &str) -> Result<(), String> {
+pub(super) fn validate_path_tenant(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("tenant must not be empty".to_string());
     }

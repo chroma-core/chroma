@@ -5,21 +5,15 @@
 //! tenant and a Foundation in the path, which is what lets one key reach any
 //! Foundation in its tenant.
 //!
-//! The two paths take different credentials. The bare path is the OAuth
-//! resource: it is the only path named by the protected-resource metadata
-//! document, the only one an authorization server issues tokens for, and the
-//! only one that ever answers with the challenge a browser client rediscovers
-//! itself from — on a 401, which is the one refusal a fresh token lifts. The
-//! prefixed path takes a Chroma API key in the bearer header, so a browser
-//! client keeps using the bare path.
+//! The explicit path for the default Foundation supports OAuth discovery and
+//! Chroma API keys. The bare path remains an OAuth resource for existing client
+//! connections until those clients reconnect to the explicit path. Other named
+//! Foundations take a Chroma API key in the bearer header.
 //!
-//! No refusal from the prefixed path names the metadata document, because that
-//! document describes the bare path as its resource. Its 401 carries a plain
-//! bearer challenge for missing or rejected credentials. Its 403 carries a
-//! challenge that names insufficient scope and no document, which says the
-//! authorizer read the credential and refused the tenant-and-Foundation pair
-//! under it — a different thing to tell a client than "this credential could
-//! not be read".
+//! A 401 on an explicit default path names its own metadata document so an
+//! OAuth client can connect there. A 401 on any other named path carries a
+//! plain bearer challenge. A 403 carries an insufficient-scope challenge,
+//! since refreshing credentials does not grant a withdrawn permission.
 //!
 //! The MCP server handler and its tools live in [`server`]; OAuth
 //! protected-resource discovery lives in [`oauth`].
@@ -63,10 +57,12 @@ const MCP_PATH: &str = "/mcp/foundation";
 /// MCP endpoint that names its tenant and Foundation in the path.
 ///
 /// The explicit resource hierarchy uses the same parameters as the REST
-/// prefix and remains separate from the default endpoint.
+/// prefix. The default Foundation can be named here for OAuth connections.
 const MCP_SCOPED_PATH: &str = "/mcp/tenants/{tenant}/foundations/{foundation}";
 const PROTECTED_RESOURCE_METADATA_PATH: &str =
     "/.well-known/oauth-protected-resource/mcp/foundation";
+const EXPLICIT_RESOURCE_METADATA_PATH: &str =
+    "/.well-known/oauth-protected-resource/mcp/tenants/{tenant}/foundations/{foundation}";
 const FOUNDATION_SCOPE: &str = "foundation";
 const MCP_SERVER_NAME: &str = "Foundation MCP";
 const MCP_SERVER_VERSION: &str = "0.1.0";
@@ -159,6 +155,10 @@ pub(crate) fn router(server: FoundationApiServer) -> Router<FoundationApiServer>
             PROTECTED_RESOURCE_METADATA_PATH,
             get(protected_resource_metadata),
         )
+        .route(
+            EXPLICIT_RESOURCE_METADATA_PATH,
+            get(oauth::explicit_protected_resource_metadata),
+        )
         .merge(mcp)
         // CORS is applied outside the auth layer so browser preflights are
         // answered before the bearer check (a preflight carries no token).
@@ -192,10 +192,9 @@ fn mcp_cors() -> CorsLayer {
 /// error. If the failure were deferred to the tool handlers it would surface as
 /// a 200 JSON-RPC tool error, which clients treat as success.
 ///
-/// The two mounts fail differently, so each has its own gate below. The bare one
-/// carries the OAuth challenge on the 401 a refresh lifts and nothing else; the
-/// prefixed one carries a plain bearer challenge on 401 and an insufficient-scope
-/// challenge on 403. Only the bare mount advertises OAuth metadata.
+/// Both the bare and explicitly named default mounts advertise their own OAuth
+/// metadata on 401. Other named mounts carry a plain bearer challenge on 401.
+/// Every named mount carries an insufficient-scope challenge on 403.
 async fn mcp_authenticate(
     State(server): State<FoundationApiServer>,
     Path(scope): Path<FoundationScope>,
@@ -277,8 +276,12 @@ async fn authenticate_prefixed(
     mut request: Request<Body>,
     next: Next,
 ) -> Response {
+    let oauth_metadata_url = explicit_default_metadata_url(&server, &scope);
     let Some(value) = forward_bearer_token(&mut request) else {
-        return mcp_prefixed_error(StatusCode::UNAUTHORIZED);
+        return oauth_metadata_url
+            .as_deref()
+            .map(mcp_unauthorized_with_metadata)
+            .unwrap_or_else(|| mcp_prefixed_error(StatusCode::UNAUTHORIZED));
     };
 
     let mut auth_headers = HeaderMap::new();
@@ -294,7 +297,17 @@ async fn authenticate_prefixed(
     .await
     {
         Ok(resolved) => resolved,
-        Err(err) => return mcp_prefixed_error(scope_error_status(&err)),
+        Err(err) => {
+            let status = scope_error_status(&err);
+            return if status == StatusCode::UNAUTHORIZED {
+                oauth_metadata_url
+                    .as_deref()
+                    .map(mcp_unauthorized_with_metadata)
+                    .unwrap_or_else(|| mcp_prefixed_error(status))
+            } else {
+                mcp_prefixed_error(status)
+            };
+        }
     };
 
     request
@@ -302,6 +315,27 @@ async fn authenticate_prefixed(
         .insert(McpScope::Named { tenant, database });
 
     next.run(request).await
+}
+
+fn explicit_default_metadata_url(
+    server: &FoundationApiServer,
+    scope: &FoundationScope,
+) -> Option<String> {
+    let tenant = scope.tenant.as_deref()?;
+    let foundation = scope.foundation.as_deref()?;
+    if foundation != server.config.foundation.database_name
+        || super::whoami::validate_path_tenant(tenant).is_err()
+        || super::whoami::validate_foundation_name(foundation).is_err()
+    {
+        return None;
+    }
+    Some(format!(
+        "{}{}",
+        mcp_resource_origin(&server.config),
+        EXPLICIT_RESOURCE_METADATA_PATH
+            .replace("{tenant}", tenant)
+            .replace("{foundation}", foundation)
+    ))
 }
 
 /// Copies the request's bearer token onto [`CHROMA_TOKEN_HEADER`], which the
@@ -376,9 +410,8 @@ const INSUFFICIENT_SCOPE_CHALLENGE: &str = "Bearer error=\"insufficient_scope\",
 /// 2. A 401 carries `WWW-Authenticate: Bearer realm="foundation"` to request
 ///    credentials without making a claim about their scope. Other statuses
 ///    carry no challenge.
-/// 3. No refusal carries a `resource_metadata` parameter. The only document this
-///    service publishes describes the bare mount as its resource, so naming it
-///    here would send a client to rediscover a resource it did not ask for.
+/// 3. This helper never advertises metadata; the explicit default Foundation
+///    instead calls [`mcp_unauthorized_with_metadata`] with its own resource.
 fn mcp_prefixed_error(status: StatusCode) -> Response {
     let mut response = mcp_scope_error(status);
     let challenge = match status {
@@ -400,6 +433,10 @@ fn mcp_unauthorized(server: &FoundationApiServer) -> Response {
         mcp_resource_origin(&server.config),
         PROTECTED_RESOURCE_METADATA_PATH
     );
+    mcp_unauthorized_with_metadata(&metadata_url)
+}
+
+fn mcp_unauthorized_with_metadata(metadata_url: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
         [(
@@ -591,6 +628,46 @@ mod tests {
                 "Bearer resource_metadata=\"{PUBLIC_ORIGIN}\
                  /.well-known/oauth-protected-resource/mcp/foundation\""
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_default_mcp_challenges_with_its_own_oauth_resource() {
+        let response = app(Arc::new(FakeAuth::new("user_99", "team_abc")))
+            .oneshot(jsonrpc_post(
+                "/mcp/tenants/team_abc/foundations/FOUNDATION",
+                None,
+                tools_list(),
+            ))
+            .await
+            .expect("router should answer");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers().get(WWW_AUTHENTICATE).unwrap(),
+            "Bearer resource_metadata=\"https://foundation.example.com/.well-known/oauth-protected-resource/mcp/tenants/team_abc/foundations/FOUNDATION\""
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_default_metadata_advertises_the_same_resource() {
+        let response = app(Arc::new(FakeAuth::new("user_99", "team_abc")))
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/oauth-protected-resource/mcp/tenants/team_abc/foundations/FOUNDATION")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should answer");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body["resource"],
+            "https://foundation.example.com/mcp/tenants/team_abc/foundations/FOUNDATION"
         );
     }
 

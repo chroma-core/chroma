@@ -33,11 +33,8 @@ struct GenerateRecord {
 struct GenerateRecordSet {
     tenant_id: String,
     database_id: String,
-    /// The name of the database the source collection lives in, which names the
-    /// Foundation the generated pages belong to. `None` when the caller could
-    /// not resolve one; the endpoint then has to fall back to its own
-    /// configuration.
-    database_name: Option<String>,
+    /// The source database names the Foundation the generated pages belong to.
+    database_name: String,
     source_collection: String,
     source_kind: String,
     output_collection: String,
@@ -80,6 +77,8 @@ pub enum HttpGenerateError {
     MissingEnvVar(String),
     #[error("Invalid batch_size: must be a positive integer")]
     InvalidBatchSize,
+    #[error("Cannot generate pages without the source database name")]
+    MissingDatabaseName,
     #[error("HTTP error: {0}")]
     Http(String),
     #[error("Generation failed: {0}")]
@@ -93,13 +92,19 @@ impl ChromaError for HttpGenerateError {
         match self {
             HttpGenerateError::MissingParam(_)
             | HttpGenerateError::MissingEnvVar(_)
-            | HttpGenerateError::InvalidBatchSize => chroma_error::ErrorCodes::InvalidArgument,
+            | HttpGenerateError::InvalidBatchSize
+            | HttpGenerateError::MissingDatabaseName => chroma_error::ErrorCodes::InvalidArgument,
             _ => chroma_error::ErrorCodes::Internal,
         }
     }
 }
 
 impl HttpGenerateExecutor {
+    fn require_database_name(name: Option<&str>) -> Result<&str, HttpGenerateError> {
+        name.filter(|name| !name.is_empty())
+            .ok_or(HttpGenerateError::MissingDatabaseName)
+    }
+
     /// Build from an `AttachedFunction`.
     ///
     /// Reads `endpoint_url` from params JSON. Modal proxy-auth tokens come from env vars
@@ -417,10 +422,12 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
                 continue;
             }
 
+            let database_name = Self::require_database_name(batch.database_name.as_deref())
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
             record_sets.push(GenerateRecordSet {
                 tenant_id: batch.tenant_id.clone(),
                 database_id: batch.database_id.clone(),
-                database_name: batch.database_name.clone(),
+                database_name: database_name.to_string(),
                 source_collection: batch.input_collection_name.clone(),
                 source_kind: source_kind_for_collection_name(&batch.input_collection_name)
                     .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
@@ -493,7 +500,7 @@ mod tests {
         let record_set = GenerateRecordSet {
             tenant_id: "tenant".to_string(),
             database_id: "database".to_string(),
-            database_name: Some("FOUNDATION".to_string()),
+            database_name: "FOUNDATION".to_string(),
             source_collection: "slack_master".to_string(),
             source_kind: source_kind_for_collection_name("slack_master")
                 .unwrap()
@@ -512,7 +519,7 @@ mod tests {
         GenerateRecordSet {
             tenant_id: "tenant".to_string(),
             database_id: "database".to_string(),
-            database_name: Some("FOUNDATION".to_string()),
+            database_name: "FOUNDATION".to_string(),
             source_collection: "slack_master".to_string(),
             source_kind: "slack".to_string(),
             output_collection: "wiki".to_string(),
@@ -567,8 +574,7 @@ mod tests {
     fn every_split_request_keeps_the_source_database_name() {
         // Splitting a record set rebuilds its envelope for each batch, which is
         // the one place the database name could be dropped. A batch that lost it
-        // would have its pages written into whichever Foundation the endpoint
-        // falls back to.
+        // would be refused before generation instead of selecting a Foundation.
         let requests = HttpGenerateExecutor::batch_requests(
             vec![record_set_with_documents(vec![
                 "one".to_string(),
@@ -582,7 +588,7 @@ mod tests {
         assert_eq!(requests.len(), 2);
         assert!(requests
             .iter()
-            .all(|request| request.record_sets[0].database_name.as_deref() == Some("FOUNDATION")));
+            .all(|request| request.record_sets[0].database_name == "FOUNDATION"));
     }
 
     #[test]
@@ -596,6 +602,22 @@ mod tests {
         assert_eq!(
             body["record_sets"][0]["database_name"],
             serde_json::json!("FOUNDATION")
+        );
+    }
+
+    #[test]
+    fn generation_requires_a_source_database_name() {
+        assert!(matches!(
+            HttpGenerateExecutor::require_database_name(None),
+            Err(HttpGenerateError::MissingDatabaseName)
+        ));
+        assert!(matches!(
+            HttpGenerateExecutor::require_database_name(Some("")),
+            Err(HttpGenerateError::MissingDatabaseName)
+        ));
+        assert_eq!(
+            HttpGenerateExecutor::require_database_name(Some("named_foundation")).unwrap(),
+            "named_foundation"
         );
     }
 
