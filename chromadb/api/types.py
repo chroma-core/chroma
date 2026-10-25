@@ -1064,6 +1064,11 @@ def _validate_metadata_list_value(key: str, value: list) -> None:
                 f"Expected metadata list value for key '{key}' to contain only str, int, float, or bool "
                 f"and all elements must be the same type, got {value}"
             )
+        if item_type is float and not math.isfinite(item):
+            raise ValueError(
+                f"Expected metadata list value for key '{key}' to be finite floats, "
+                f"got {item} (inf/nan are not JSON-serializable and would be dropped)"
+            )
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
@@ -1099,6 +1104,11 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             raise ValueError(
                 f"Expected metadata value to be a str, int, float, bool, SparseVector, list, or None, got {value} which is a {type(value).__name__}"
             )
+        elif isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(
+                f"Expected metadata value for key '{key}' to be finite, got {value} "
+                "(inf/nan are not JSON-serializable and would be silently dropped)"
+            )
     return metadata
 
 
@@ -1126,6 +1136,11 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
         ):
             raise ValueError(
                 f"Expected metadata value to be a str, int, float, bool, SparseVector, list, or None, got {value}"
+            )
+        elif isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(
+                f"Expected metadata value for key '{key}' to be finite, got {value} "
+                "(inf/nan are not JSON-serializable and would be silently dropped)"
             )
     return metadata
 
