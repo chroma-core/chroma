@@ -1351,6 +1351,21 @@ impl SavedReader {
     pub fn root_id(&self) -> u128 {
         self.root
     }
+    /// Every leaf in depth-first order, children in saved order, so each
+    /// subtree's leaves are consecutive.
+    pub fn leaves_depth_first(&self) -> Vec<u128> {
+        let mut out = Vec::with_capacity(self.posting_objects.len());
+        let mut stack = vec![self.root];
+        while let Some(id) = stack.pop() {
+            let Some(node) = self.nodes.get(&id) else { continue };
+            if node.leaf {
+                out.push(id);
+            } else {
+                stack.extend(node.children.iter().rev().map(|c| c.id));
+            }
+        }
+        out
+    }
     /// Every saved node as (id, parent, leaf, owner), in ID order.
     pub fn tree_shape(&self) -> impl Iterator<Item = (u128, Option<u128>, bool, u64)> + '_ {
         self.nodes.values().map(|n| (n.id, n.parent, n.leaf, n.owner))

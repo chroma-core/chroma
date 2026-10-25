@@ -435,8 +435,71 @@ struct Slot {
 
 /// Scans the leaves of the owners this process serves, caching each decoded
 /// posting list on first use.
+/// Which reader process scans each leaf. By default a leaf belongs to the
+/// part named by its saved owner. A reader can instead split the leaves into
+/// `M` parts when it opens an index, independently of how the index was
+/// saved: leaves in depth-first order, so whole subtrees stay together, cut
+/// into `M` runs of nearly equal posting bytes, numbered 1 to `M`. Every
+/// process that serves an index must use the same placement.
+pub struct Placement {
+    part: HashMap<u128, u64>,
+    parts: u64,
+    /// "saved" or "subtree".
+    pub kind: &'static str,
+}
+impl Placement {
+    pub fn saved(reader: &SavedReader) -> Self {
+        let part: HashMap<u128, u64> = reader
+            .leaves()
+            .filter_map(|leaf| reader.node_owner(leaf).map(|o| (leaf, o)))
+            .collect();
+        let parts = part.values().copied().collect::<BTreeSet<_>>().len() as u64;
+        Self { part, parts, kind: "saved" }
+    }
+    pub fn subtrees(reader: &SavedReader, parts: u64) -> Result<Self> {
+        let order = reader.leaves_depth_first();
+        if parts == 0 || parts as usize > order.len() {
+            return Err(format!("cannot split {} leaves into {parts} parts", order.len()));
+        }
+        let bytes: Vec<u64> = order
+            .iter()
+            .map(|l| reader.posting_object_bytes(*l).unwrap_or(0).max(1))
+            .collect();
+        let total: u64 = bytes.iter().sum();
+        let mut part = HashMap::with_capacity(order.len());
+        let (mut current, mut seen) = (0u64, 0u64);
+        for (leaf, b) in order.iter().zip(&bytes) {
+            // Move to the next part once this leaf's midpoint passes the
+            // current part's equal share of all posting bytes.
+            while current + 1 < parts && (seen + b / 2) as u128 * parts as u128 > total as u128 * (current + 1) as u128 {
+                current += 1;
+            }
+            part.insert(*leaf, current + 1);
+            seen += b;
+        }
+        Ok(Self { part, parts, kind: "subtree" })
+    }
+    pub fn part(&self, leaf: u128) -> Option<u64> {
+        self.part.get(&leaf).copied()
+    }
+    pub fn parts(&self) -> u64 {
+        self.parts
+    }
+    pub fn leaves_of(&self, parts: &BTreeSet<u64>) -> BTreeSet<u128> {
+        self.part.iter().filter(|(_, p)| parts.contains(p)).map(|(l, _)| *l).collect()
+    }
+    pub fn leaves_by_part(&self) -> BTreeMap<u64, usize> {
+        let mut counts = BTreeMap::new();
+        for p in self.part.values() {
+            *counts.entry(*p).or_default() += 1;
+        }
+        counts
+    }
+}
+
 pub struct ScanEngine {
     reader: Arc<SavedReader>,
+    placement: Arc<Placement>,
     vectors: Option<FullVectors>,
     slots: HashMap<u128, Slot>,
     fetch_pool: rayon::ThreadPool,
@@ -446,6 +509,7 @@ pub struct ScanEngine {
 }
 impl ScanEngine {
     /// `owners` lists the owners whose leaves this process may scan.
+    /// An engine for the leaves of `owners`, by their saved owners.
     pub fn new(
         reader: Arc<SavedReader>,
         owners: &BTreeSet<u64>,
@@ -454,9 +518,23 @@ impl ScanEngine {
         scan_threads: usize,
         budget_bytes: u64,
     ) -> Result<Self> {
+        let placement = Arc::new(Placement::saved(&reader));
+        Self::with_placement(reader, placement, owners, vectors, fetch_threads, scan_threads, budget_bytes)
+    }
+    /// An engine for the leaves that `placement` assigns to `parts`.
+    pub fn with_placement(
+        reader: Arc<SavedReader>,
+        placement: Arc<Placement>,
+        parts: &BTreeSet<u64>,
+        vectors: Option<FullVectors>,
+        fetch_threads: usize,
+        scan_threads: usize,
+        budget_bytes: u64,
+    ) -> Result<Self> {
+        let owners = parts;
         let slots = reader
             .leaves()
-            .filter(|leaf| reader.node_owner(*leaf).is_some_and(|o| owners.contains(&o)))
+            .filter(|leaf| placement.part(*leaf).is_some_and(|o| owners.contains(&o)))
             .map(|leaf| {
                 let slot = Slot {
                     value: OnceLock::new(),
@@ -477,6 +555,7 @@ impl ScanEngine {
             .map_err(|e| e.to_string())?;
         Ok(Self {
             reader,
+            placement,
             vectors,
             slots,
             fetch_pool,
@@ -484,6 +563,9 @@ impl ScanEngine {
             budget_bytes,
             cached_bytes: AtomicU64::new(0),
         })
+    }
+    pub fn placement(&self) -> &Arc<Placement> {
+        &self.placement
     }
     pub fn cached_bytes(&self) -> u64 {
         self.cached_bytes.load(Ordering::Relaxed)
@@ -712,6 +794,8 @@ pub struct QueryRecord {
 }
 
 /// The query machine: local navigation, per-owner scans and the merge.
+/// "Owner" here means a part of the local engine's placement: the saved owner
+/// by default, or a read-time subtree part.
 pub struct OwnerQuery {
     pub reader: Arc<SavedReader>,
     pub local: Arc<ScanEngine>,
@@ -753,8 +837,9 @@ impl OwnerQuery {
             ..Default::default()
         };
         let mut groups: BTreeMap<u64, Vec<u128>> = BTreeMap::new();
+        let placement = self.local.placement();
         for (leaf, _) in &leaves {
-            let owner = self.reader.node_owner(leaf.id).ok_or("navigation reached an unknown leaf")?;
+            let owner = placement.part(leaf.id).ok_or("navigation reached an unknown leaf")?;
             groups.entry(owner).or_default().push(leaf.id);
         }
         for owner in groups.keys() {

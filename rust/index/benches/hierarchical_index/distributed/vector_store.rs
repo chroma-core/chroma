@@ -25,6 +25,7 @@ use chroma_storage::{
     Storage,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -590,6 +591,34 @@ impl VectorStoreReader {
 
     pub fn dimensions(&self) -> usize {
         self.dimensions
+    }
+
+    /// Keep only the blocks whose key range can hold rows of `leaves`, for a
+    /// reader that serves just those leaves. Lookups of other leaves are no
+    /// longer valid. Returns (blocks kept, blocks before).
+    pub fn restrict_to_leaves(&mut self, leaves: &BTreeSet<u128>) -> (usize, usize) {
+        let before = self.index.ids.len();
+        let mut starts = vec![];
+        let mut ids = vec![];
+        for i in 0..before {
+            let start = self.index.starts[i];
+            let end = self.index.starts.get(i + 1).copied();
+            // Rows of leaf L have keys (L, 0..). A block holds some when its
+            // start is at most (L, u32::MAX) and the next block starts after (L, 0).
+            let first = leaves.range(start.0..).next();
+            let holds = leaves
+                .range(..=start.0)
+                .next_back()
+                .into_iter()
+                .chain(first)
+                .any(|l| (*l, u32::MAX) >= start && end.is_none_or(|e| e > (*l, 0)));
+            if holds {
+                starts.push(start);
+                ids.push(self.index.ids[i]);
+            }
+        }
+        self.index = BlockIndex { starts, ids };
+        (self.index.ids.len(), before)
     }
 
     pub fn rows(&self) -> u64 {

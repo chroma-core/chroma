@@ -15,7 +15,7 @@ use hierarchical_index::{
         generation::{GenerationDescriptor, GenerationStore},
         generation_backend::DurableStoreConfig,
         mapped_vectors::MappedVectorSource,
-        owner_scan::{self, FullVectors, OwnerQuery, RemoteOwner, ScanEngine, ScanRequest},
+        owner_scan::{self, FullVectors, OwnerQuery, Placement, RemoteOwner, ScanEngine, ScanRequest},
         reader_bench::{self as rb, BenchConfig, BenchQuery},
         saved_reader::{CanonicalVectorSource, SavedReader},
         transport::{RpcClient, RpcServer, TransportConfig},
@@ -112,6 +112,12 @@ struct Args {
     /// with no --remote means every owner is scanned locally.
     #[arg(long, value_delimiter = ',')]
     local_owners: Vec<u64>,
+    /// Split the index into this many parts when it opens, by subtree, and
+    /// route each leaf to its part instead of its saved owner. --local-owners
+    /// and --remote then name parts 1 to N. 0 keeps the saved owners. Every
+    /// process serving one index must use the same value.
+    #[arg(long, default_value_t = 0)]
+    parts: u64,
     /// Bench: a remote owner as OWNER@DATA_ADDR/CONTROL_ADDR; repeatable.
     #[arg(long)]
     remote: Vec<String>,
@@ -770,30 +776,49 @@ fn vector_store_location(args: &Args) -> Result<VectorStoreLocation, Box<dyn std
         None => VectorStoreLocation::Local(args.store.clone()),
     })
 }
+/// The leaf placement every process of this run uses: saved owners, or
+/// --parts subtree parts.
+fn placement(args: &Args, reader: &SavedReader) -> Result<Arc<Placement>, Box<dyn std::error::Error>> {
+    Ok(Arc::new(if args.parts == 0 {
+        Placement::saved(reader)
+    } else {
+        Placement::subtrees(reader, args.parts)?
+    }))
+}
+/// Vector stores of the saved owners whose leaves this process scans. Under a
+/// read-time placement, each store keeps only the blocks of those leaves.
 fn open_vector_stores(
     args: &Args,
     reader: &SavedReader,
-    owners: &BTreeSet<u64>,
+    placement: &Placement,
+    parts: &BTreeSet<u64>,
 ) -> Result<std::collections::BTreeMap<u64, Arc<VectorStoreReader>>, Box<dyn std::error::Error>> {
     let location = vector_store_location(args)?;
     let refs = reader.owner_vector_stores();
+    let leaves = placement.leaves_of(parts);
+    let owners: BTreeSet<u64> = leaves.iter().filter_map(|l| reader.node_owner(*l)).collect();
     let mut stores = std::collections::BTreeMap::new();
     for owner in owners {
-        let r = refs.get(owner).ok_or_else(|| format!("generation has no vector store for owner {owner}"))?;
-        stores.insert(*owner, Arc::new(VectorStoreReader::open(&location, r, args.vector_store_cache_bytes)?));
+        let r = refs.get(&owner).ok_or_else(|| format!("generation has no vector store for owner {owner}"))?;
+        let mut store = VectorStoreReader::open(&location, r, args.vector_store_cache_bytes)?;
+        if placement.kind != "saved" {
+            store.restrict_to_leaves(&leaves);
+        }
+        stores.insert(owner, Arc::new(store));
     }
     Ok(stores)
 }
-/// The rerank source for the owners this process scans.
+/// The rerank source for the parts this process scans.
 fn full_vectors(
     args: &Args,
     reader: &SavedReader,
-    owners: &BTreeSet<u64>,
+    placement: &Placement,
+    parts: &BTreeSet<u64>,
     mapped: Option<Arc<MappedVectorSource>>,
 ) -> Result<Option<FullVectors>, Box<dyn std::error::Error>> {
     Ok(match args.full_vectors {
         FullVectorSource::Corpus => mapped.map(FullVectors::Mapped),
-        FullVectorSource::Store => Some(FullVectors::Store(open_vector_stores(args, reader, owners)?)),
+        FullVectorSource::Store => Some(FullVectors::Store(open_vector_stores(args, reader, placement, parts)?)),
     })
 }
 fn open_mapped(
@@ -912,15 +937,17 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|e| format!("{e:?}"))?;
                 remotes.push(RemoteOwner { owner, client });
             }
-            let all: BTreeSet<u64> = owner_scan::leaves_by_owner(&reader).into_keys().collect();
+            let placement = placement(args, &reader)?;
+            let all: BTreeSet<u64> = placement.leaves_by_part().into_keys().collect();
             let local_owners: BTreeSet<u64> = if args.local_owners.is_empty() && remotes.is_empty() {
                 all
             } else {
                 args.local_owners.iter().copied().collect()
             };
-            let rerank_source = full_vectors(args, &reader, &local_owners, vectors.clone())?;
-            let engine = ScanEngine::new(
+            let rerank_source = full_vectors(args, &reader, &placement, &local_owners, vectors.clone())?;
+            let engine = ScanEngine::with_placement(
                 reader.clone(),
+                placement.clone(),
                 &local_owners,
                 rerank_source,
                 args.fetch_threads,
@@ -1039,6 +1066,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         "local_owners": owner_query.as_ref().map(|q| q.local_owners.clone()),
         "remote_owners": owner_query.as_ref().map(|q| q.remotes.iter().map(|r| r.owner).collect::<Vec<_>>()),
         "leaves_by_owner": owner_scan::leaves_by_owner(&reader),
+        "placement": owner_query.as_ref().map(|q| { let p = q.local.placement(); json!({"kind": p.kind, "parts": p.parts(), "leaves_by_part": p.leaves_by_part()}) }),
         "posting_cache_bytes_after": owner_query.as_ref().map(|q| q.local.cached_bytes()),
         "corpus_resident_pages_after": mapped.as_ref().and_then(|m| m.resident_pages().ok()),
         // Today's single reader fetches every visited posting object on every
@@ -1064,9 +1092,10 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 }
 /// Answer scan requests for one owner until the process is stopped.
 fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
-    let [owner] = args.local_owners.as_slice() else {
-        return Err("serve needs exactly one --local-owners".into());
-    };
+    if args.local_owners.is_empty() {
+        return Err("serve needs --local-owners".into());
+    }
+    let owners: BTreeSet<u64> = args.local_owners.iter().copied().collect();
     let (Some(data), Some(control)) = (args.scan_data_bind, args.scan_control_bind) else {
         return Err("serve needs --scan-data-bind and --scan-control-bind".into());
     };
@@ -1079,10 +1108,12 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         open_mapped(args, &reader)?
     };
-    let rerank_source = full_vectors(args, &reader, &[*owner].into(), vectors)?;
-    let engine = Arc::new(ScanEngine::new(
+    let placement = placement(args, &reader)?;
+    let rerank_source = full_vectors(args, &reader, &placement, &owners, vectors)?;
+    let engine = Arc::new(ScanEngine::with_placement(
         reader.clone(),
-        &[*owner].into(),
+        placement.clone(),
+        &owners,
         rerank_source,
         args.fetch_threads,
         args.scan_threads,
@@ -1100,7 +1131,8 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&args.output)?;
     let ready = json!({
         "status": "serving",
-        "owner": owner,
+        "owners": owners,
+        "placement": {"kind": placement.kind, "parts": placement.parts(), "leaves_by_part": placement.leaves_by_part()},
         "generation": descriptor,
         "data_addr": server.data_addr().to_string(),
         "control_addr": server.control_addr().to_string(),
