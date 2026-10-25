@@ -29,7 +29,7 @@ class CloudClient extends ChromaClient {
     }
 
     cloudHost = cloudHost || "https://api.trychroma.com";
-    cloudPort = cloudPort || "8000";
+    cloudPort = cloudPort || "443";
 
     const path = `${cloudHost}:${cloudPort}`;
 
