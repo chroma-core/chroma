@@ -1528,6 +1528,23 @@ impl CanonicalVectorSource {
         {
             return Err("vector file length mismatch".into());
         }
+        // With SPANN_INPUT_RECEIPT_DIR set, a current hash receipt (the
+        // reader's mapped-corpus receipt: same file identity and digest) skips
+        // the full-file hash. Each 100M ladder save otherwise hashes the
+        // 307 GB input three times.
+        if let Ok(dir) = std::env::var("SPANN_INPUT_RECEIPT_DIR") {
+            super::mapped_vectors::verify_with_receipt(
+                std::path::Path::new(&descriptor.path),
+                &mut file,
+                &descriptor.sha256,
+                Some(std::path::Path::new(&dir)),
+            )?;
+            return Ok(Self {
+                file,
+                descriptor,
+                resident: None,
+            });
+        }
         let mut hash = Sha256::new();
         let mut buffer = vec![0u8; 1024 * 1024];
         loop {

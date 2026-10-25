@@ -236,6 +236,37 @@ fn validate(d: &VectorFileDescriptor) -> Result<()> {
     Ok(())
 }
 
+/// Check `file` against `sha256`, skipping the full hash when a current
+/// receipt in `receipt_dir` already records this file's identity with that
+/// digest, and writing one after a successful hash. Returns whether it hashed.
+pub(super) fn verify_with_receipt(
+    path: &Path,
+    file: &mut File,
+    sha256: &str,
+    receipt_dir: Option<&Path>,
+) -> Result<bool> {
+    let receipt_path = receipt_path(path, receipt_dir)?;
+    let meta = file.metadata().map_err(|e| e.to_string())?;
+    let expected = HashReceipt::of(&meta, sha256)?;
+    let current = std::fs::read(&receipt_path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<HashReceipt>(&b).ok())
+        .is_some_and(|r| r == expected);
+    if current {
+        return Ok(false);
+    }
+    let digest = hash_file(file)?;
+    if !digest.eq_ignore_ascii_case(sha256) {
+        return Err("vector corpus SHA-256 mismatch".into());
+    }
+    let after = file.metadata().map_err(|e| e.to_string())?;
+    if HashReceipt::of(&after, sha256)? != expected {
+        return Err("vector file changed while hashing".into());
+    }
+    let _ = write_receipt(&receipt_path, &expected);
+    Ok(true)
+}
+
 fn receipt_path(corpus: &Path, dir: Option<&Path>) -> Result<PathBuf> {
     let mut name = corpus
         .file_name()
