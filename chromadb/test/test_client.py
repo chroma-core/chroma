@@ -343,3 +343,18 @@ def test_rust_bindings_api_stop_closes_bindings() -> None:
     bindings.close.assert_called_once_with()
     assert hasattr(api, "bindings") is False
     assert api._running is False
+
+
+def test_async_fastapi_heartbeat_uses_heartbeat_path() -> None:
+    """AsyncFastAPI.heartbeat() must request the /heartbeat path, matching the sync
+    FastAPI client and the server contract (regression test for issue #6870)."""
+    from unittest.mock import AsyncMock
+    from chromadb.api.async_fastapi import AsyncFastAPI
+
+    api = AsyncFastAPI.__new__(AsyncFastAPI)
+    api._make_request = AsyncMock(return_value={"nanosecond heartbeat": 123})  # type: ignore[method-assign]
+
+    result = asyncio.get_event_loop().run_until_complete(api.heartbeat())
+
+    assert result == 123
+    api._make_request.assert_awaited_once_with("get", "/heartbeat")
