@@ -1963,7 +1963,7 @@ impl Cluster {
                 &request,
                 class,
                 deadline,
-                super::save_runtime::SAVE_OPERATION_TIMEOUT,
+                super::save_runtime::save_operation_timeout(),
             )
         } else {
             peer.call(&request, class, deadline)

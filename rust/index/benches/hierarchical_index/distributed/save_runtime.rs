@@ -31,7 +31,17 @@ const MAX_SAVE_OWNER_CONCURRENCY: usize = 2;
 /// cancel synchronous storage calls. The process supervisor remains the hard stop.
 /// Saving an owner's full-vector store moves gigabytes, so the budget allows
 /// for it.
-pub const SAVE_OPERATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1800);
+/// SPANN_SAVE_OPERATION_SECONDS overrides the 1,800-second default; a 100M
+/// save that writes both owners' vector stores takes longer.
+pub fn save_operation_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(
+        std::env::var("SPANN_SAVE_OPERATION_SECONDS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(1800),
+    )
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveOwnerRequest {
@@ -512,9 +522,9 @@ impl Cluster {
         generation: &str,
         save_attempt: &str,
     ) -> Result<(GenerationDescriptor, SaveProfile)> {
-        let save_deadline = (Instant::now() + SAVE_OPERATION_TIMEOUT).min(
+        let save_deadline = (Instant::now() + save_operation_timeout()).min(
             self.shutdown_deadline
-                .unwrap_or(Instant::now() + SAVE_OPERATION_TIMEOUT),
+                .unwrap_or(Instant::now() + save_operation_timeout()),
         );
         let check_save_deadline = || -> Result<()> {
             if Instant::now() >= save_deadline {

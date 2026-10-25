@@ -426,7 +426,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(move |request: EngineRequest| handler.handle(request)),
         Arc::new(move |request: &EngineRequest| {
             let cap = if matches!(request, EngineRequest::SaveOwner(_) | EngineRequest::WriterCheckpoint { .. } | EngineRequest::ValidateWriter) {
-                hierarchical_index::distributed::save_runtime::SAVE_OPERATION_TIMEOUT
+                hierarchical_index::distributed::save_runtime::save_operation_timeout()
             } else {
                 ordinary_timeout
             };
