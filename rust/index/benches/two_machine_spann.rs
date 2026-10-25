@@ -653,12 +653,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fold(1.0, f64::min);
     // Counts are an occupancy check. Exact membership and durable-save checks must
     // pass before this campaign can produce an admitted performance report.
-    let result = json!({"status":"construction_complete_pending_durable_validation","rows":args.rows,"run":args.run.to_string(),"construction_seconds":construction,"construction_seconds_scope":"gross elapsed build, including external profile-gate waits and phase-boundary reporting; compare balance_seconds for measured construction work","settings":settings,"routing_shape":final_routing_shape,"routing_shape_seconds":shape_seconds,"cycles":cycles,"owners":final_counts,"placement_statistics":final_placement_statistics,"minimum_owner_share":min_share,"placement_acceptance":min_share>=0.30,"peer_transport":client.counters(),"rpc_accounting":rpc_accounting(&client,&server),"physical_distribution":"requires independently retained instance and process receipts","validation_complete":false});
+    let result = json!({"status":"construction_complete_pending_durable_validation","rows":args.rows,"run":args.run.to_string(),"construction_seconds":construction,"construction_seconds_scope":"gross elapsed build, including external profile-gate waits and phase-boundary reporting; compare balance_seconds for measured construction work","settings":settings,"routing_shape":final_routing_shape,"routing_shape_seconds":shape_seconds,"cycles":cycles,"owners":final_counts,"placement_statistics":final_placement_statistics,"minimum_owner_share":min_share,"placement_acceptance":min_share>=0.30,"unplaced_single_owner":args.placement_start > args.rows,"peer_transport":client.counters(),"rpc_accounting":rpc_accounting(&client,&server),"physical_distribution":"requires independently retained instance and process receipts","validation_complete":false});
     fs::write(
         args.output.join("construction.json"),
         serde_json::to_vec_pretty(&result)?,
     )?;
-    if min_share < 0.30 {
+    // A save that never places (placement start beyond the workload) keeps
+    // every vector on owner 1 on purpose: readers split it at open time.
+    let unplaced = args.placement_start > args.rows;
+    if min_share < 0.30 && !unplaced {
         return Err(
             "actual smaller owner holds below30%; benchmark placement requirement failed".into(),
         );
