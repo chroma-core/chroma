@@ -48,7 +48,7 @@ class ProductTelemetryEvent:
 
 
 class ProductTelemetryClient(Component):
-    USER_ID_PATH = str(Path.home() / ".cache" / "chroma" / "telemetry_user_id")
+    USER_ID_PATH = ""
     UNKNOWN_USER_ID = "UNKNOWN"
     SERVER_CONTEXT: ServerContext = ServerContext.NONE
     _curr_user_id = None
@@ -83,14 +83,17 @@ class ProductTelemetryClient(Component):
         # File access may fail due to permissions or other reasons. We don't want to
         # crash so we catch all exceptions.
         try:
-            if not os.path.exists(self.USER_ID_PATH):
-                os.makedirs(os.path.dirname(self.USER_ID_PATH), exist_ok=True)
-                with open(self.USER_ID_PATH, "w") as f:
+            user_id_path = self.USER_ID_PATH or str(
+                Path.home() / ".cache" / "chroma" / "telemetry_user_id"
+            )
+            if not os.path.exists(user_id_path):
+                os.makedirs(os.path.dirname(user_id_path), exist_ok=True)
+                with open(user_id_path, "w") as f:
                     new_user_id = str(uuid.uuid4())
                     f.write(new_user_id)
                 self._curr_user_id = new_user_id
             else:
-                with open(self.USER_ID_PATH, "r") as f:
+                with open(user_id_path, "r") as f:
                     self._curr_user_id = f.read()
         except Exception:
             self._curr_user_id = self.UNKNOWN_USER_ID
