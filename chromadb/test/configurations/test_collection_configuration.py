@@ -13,6 +13,7 @@ from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
     load_collection_configuration_from_json,
+    load_create_collection_configuration_from_json,
     CreateHNSWConfiguration,
     UpdateHNSWConfiguration,
     CreateSpannConfiguration,
@@ -26,6 +27,24 @@ from chromadb.test.conftest import ClientFactories
 from chromadb.test.conftest import is_spann_disabled_mode, skip_reason_spann_disabled
 from chromadb.types import Collection as CollectionModel
 from typing import Optional, TypedDict
+
+
+def test_load_create_spann_configuration_preserves_supported_fields() -> None:
+    spann_config: CreateSpannConfiguration = {
+        "search_nprobe": 10,
+        "write_nprobe": 11,
+        "space": "cosine",
+        "ef_construction": 100,
+        "ef_search": 101,
+        "max_neighbors": 64,
+        "reassign_neighbor_count": 32,
+        "split_threshold": 100,
+        "merge_threshold": 50,
+    }
+
+    loaded = load_create_collection_configuration_from_json({"spann": spann_config})
+
+    assert loaded["spann"] == spann_config
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
