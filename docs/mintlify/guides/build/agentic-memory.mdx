@@ -255,6 +255,10 @@ Memories don't stay useful forever. Consider tracking:
 * **Recency**: Recently created or accessed memories are more likely to be relevant than stale ones.
 * **Time-sensitivity**: Some memories have natural expiration. "User is preparing for Q3 review" becomes irrelevant after Q3 ends.
 
+### Trust and Validation
+
+Not every source deserves the same trust at write time. A memory extracted from a tool result, a web page or another agent's message can carry instructions that are replayed into every later run: memory poisoning, [ASI06](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) in the OWASP Top 10 for Agentic Applications and [AML.T0080.000](https://atlas.mitre.org/techniques/AML.T0080.000) in MITRE ATLAS. Use the **Source** tag above to apply stricter validation to untrusted sources, screen values for embedded instructions and sensitive data before they are persisted, and keep integrity checks on memories that must not change (for example, procedural rules). [OWASP Agent Memory Guard](https://github.com/OWASP/www-project-agent-memory-guard) is an open-source guard that applies these checks on the write/read path and has adapters for LangChain, OpenAI Agents SDK, AutoGen, CrewAI and mem0.
+
 ## Example: An Inbox Processing Agent
 
 In the [Chroma Cookbooks](https://github.com/chroma-core/chroma-cookbooks/tree/master/agentic-memory) repo, we feature a simple example using agentic memory. The project includes an inbox-processing agent, which fetches unread emails from a user's inbox and processes each one by user-defined rules. If the agent does not know how to process a given email, it will prompt the user for instructions. These instructions are then extracted from the run to be persisted in the agent's memory collection as procedural memory records, which can be used in future runs.
