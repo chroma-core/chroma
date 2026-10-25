@@ -162,6 +162,107 @@ fn open_validates_reference() {
     assert!(VectorStoreReader::open(&location, &bad, 1 << 20).is_err());
 }
 
+/// Writes `leaves()` with `writers` parallel writers, reading vectors by ID.
+/// ID `leaf_index * 1000 + position` names `vector(leaf, position)`.
+fn write_parallel(
+    dir: &std::path::Path,
+    writers: usize,
+    chunk_bytes: usize,
+) -> (VectorStoreLocation, VectorStoreRef) {
+    let location = VectorStoreLocation::Local(dir.to_path_buf());
+    let all = leaves();
+    let ids: Vec<Vec<u64>> = all
+        .iter()
+        .enumerate()
+        .map(|(l, (_, vs))| (0..vs.len() as u64).map(|i| l as u64 * 1000 + i).collect())
+        .collect();
+    let input: Vec<(u128, &[u64])> = all.iter().zip(&ids).map(|((leaf, _), ids)| (*leaf, &ids[..])).collect();
+    let vectors = |id: u64| -> Result<Arc<[f32]>, String> {
+        let (leaf, _) = all[(id / 1000) as usize];
+        Ok(vector(leaf, (id % 1000) as usize))
+    };
+    let reference = write_owner_vectors_parallel_chunked(
+        &location,
+        7,
+        DIM,
+        SMALL_BLOCK,
+        chunk_bytes,
+        writers,
+        &input,
+        &vectors,
+    )
+    .unwrap();
+    (location, reference)
+}
+
+#[test]
+fn parallel_writers_round_trip() {
+    // Leaves hold 7, 20, 0, 5 and 9 vectors. Ranges cut only before a
+    // non-empty leaf once they reach 41 / writers rows, so 2 and 3 writers
+    // both cut once (after the 27 rows of the first three leaves) and 64
+    // writers give each non-empty leaf its own segment.
+    for (writers, segments) in [(1, 0), (2, 2), (3, 2), (64, 4)] {
+        for chunk_bytes in [usize::MAX, 40 * 1024] {
+            let dir = tempfile::tempdir().unwrap();
+            let (location, reference) = write_parallel(dir.path(), writers, chunk_bytes);
+            assert_eq!(reference.rows, 41);
+            assert_eq!(reference.segments.len(), segments, "{writers} writers");
+            let kind = if segments == 0 { LEAF_ORDINAL_LAYOUT } else { SEGMENTED_LEAF_ORDINAL_LAYOUT };
+            assert_eq!(reference.kind, kind);
+            if segments > 0 {
+                assert_eq!(reference.segments.iter().map(|s| s.rows).sum::<u64>(), 41);
+                assert!(reference.segments.windows(2).all(|w| w[0].first_leaf < w[1].first_leaf));
+            }
+            let json = serde_json::to_string(&reference).unwrap();
+            assert_eq!(serde_json::from_str::<VectorStoreRef>(&json).unwrap(), reference);
+            let reader = VectorStoreReader::open(&location, &reference, 64 * 1024 * 1024).unwrap();
+            assert_exact(&reader, &shuffled(all_keys(), writers));
+        }
+    }
+}
+
+#[test]
+fn segmented_reader_restricts_to_leaves() {
+    let dir = tempfile::tempdir().unwrap();
+    let (location, reference) = write_parallel(dir.path(), 64, usize::MAX);
+    let mut reader = VectorStoreReader::open(&location, &reference, 64 * 1024 * 1024).unwrap();
+    let keep: BTreeSet<u128> = [10u128, u128::MAX].into_iter().collect();
+    let (kept, before) = reader.restrict_to_leaves(&keep);
+    assert!(kept < before, "{kept} of {before}");
+    let keys: Vec<_> = all_keys().into_iter().filter(|(l, _)| keep.contains(l)).collect();
+    assert_exact(&reader, &keys);
+}
+
+#[test]
+fn segmented_open_validates_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let (location, reference) = write_parallel(dir.path(), 3, usize::MAX);
+    let mut bad = reference.clone();
+    bad.segments[1].rows += 1;
+    let err = VectorStoreReader::open(&location, &bad, 1 << 20).err().unwrap();
+    assert!(err.contains("rows"), "{err}");
+    let mut bad = reference.clone();
+    bad.segments.clear();
+    assert!(VectorStoreReader::open(&location, &bad, 1 << 20).is_err());
+    let mut bad = reference.clone();
+    bad.segments.swap(0, 1);
+    assert!(VectorStoreReader::open(&location, &bad, 1 << 20).is_err());
+    let mut bad = reference;
+    bad.kind = LEAF_ORDINAL_LAYOUT.into();
+    assert!(VectorStoreReader::open(&location, &bad, 1 << 20).is_err());
+}
+
+#[test]
+fn parallel_writers_reject_unordered_leaves() {
+    let dir = tempfile::tempdir().unwrap();
+    let location = VectorStoreLocation::Local(dir.path().to_path_buf());
+    let ids = [1u64];
+    let vectors = |_| -> Result<Arc<[f32]>, String> { Ok(vector(1, 0)) };
+    let err = write_owner_vectors_parallel(&location, 1, DIM, SMALL_BLOCK, 4, &[(5, &ids[..]), (3, &ids[..])], &vectors)
+        .unwrap_err();
+    assert!(err.contains("strictly ascending"), "{err}");
+}
+
 #[test]
 fn empty_owner_round_trips() {
     let dir = tempfile::tempdir().unwrap();
@@ -512,5 +613,38 @@ fn rerank_microbench() {
             let d: f32 = row.iter().zip(&query).map(|(a, b)| (a - b) * (a - b)).sum();
             assert_eq!(d.to_bits(), w.to_bits());
         }
+    }
+}
+
+/// Write throughput of 1 writer against several, on local disk, or in S3
+/// when `SPANN_VECTOR_BENCH_BUCKET` and `SPANN_VECTOR_BENCH_PREFIX` are set.
+/// `SPANN_VECTOR_BENCH_LEAVES` sets the size (50 vectors per leaf; default
+/// 4,000 leaves, 614 MB) and `SPANN_VECTOR_BENCH_WRITERS` the writer counts.
+/// `cargo test --release ... parallel_write_throughput -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn parallel_write_throughput() {
+    let env = |k: &str| std::env::var(k).ok();
+    let leaves_n: u64 = env("SPANN_VECTOR_BENCH_LEAVES").map_or(4_000, |v| v.parse().unwrap());
+    let counts: Vec<usize> = env("SPANN_VECTOR_BENCH_WRITERS")
+        .map_or(vec![1, 4, 16, 32], |v| v.split(',').map(|n| n.parse().unwrap()).collect());
+    let per_leaf = 50u64;
+    let ids: Vec<Vec<u64>> = (0..leaves_n).map(|l| (0..per_leaf).map(|i| l * per_leaf + i).collect()).collect();
+    let input: Vec<(u128, &[u64])> = ids.iter().enumerate().map(|(l, ids)| (l as u128, &ids[..])).collect();
+    let vectors = |id: u64| -> Result<Arc<[f32]>, String> { Ok(vec![id as f32; DIM].into()) };
+    for writers in counts {
+        let dir = tempfile::tempdir().unwrap();
+        let location = match (env("SPANN_VECTOR_BENCH_BUCKET"), env("SPANN_VECTOR_BENCH_PREFIX")) {
+            (Some(bucket), Some(prefix)) => VectorStoreLocation::Durable(DurableStoreConfig {
+                bucket,
+                prefix: format!("{prefix}/writers-{writers}"),
+            }),
+            _ => VectorStoreLocation::Local(dir.path().to_path_buf()),
+        };
+        let t = std::time::Instant::now();
+        let r = write_owner_vectors_parallel(&location, 1, DIM, DEFAULT_VECTOR_BLOCK_SIZE_BYTES, writers, &input, &vectors).unwrap();
+        let s = t.elapsed().as_secs_f64();
+        let mb = (r.rows as usize * DIM * 4) as f64 / 1e6;
+        println!("writers {writers}: {} rows, {mb:.0} MB in {s:.2} s = {:.0} MB/s", r.rows, mb / s);
     }
 }

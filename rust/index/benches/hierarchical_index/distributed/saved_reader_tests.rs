@@ -866,6 +866,7 @@ fn v2_owner_routing_carries_an_optional_vector_store() {
         rows: 3,
         dimensions: 17,
         max_block_size_bytes: 1 << 20,
+        segments: vec![],
     };
     let dir = tempfile::tempdir().unwrap();
     let d = setup_deep(dir.path(), SavedLayout::V2, Some(reference(10)));

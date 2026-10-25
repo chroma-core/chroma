@@ -198,7 +198,8 @@ fn open_reader(
     Ok((descriptor, reader))
 }
 /// Compare every vector in each owner's saved vector store with the
-/// independently hashed corpus, bit for bit, in posting order.
+/// independently hashed corpus, bit for bit, in posting order. Threads take
+/// batches of 64 leaves in turn (`SPANN_VECTOR_VERIFY_THREADS`, default 32).
 fn verify_vector_stores(
     args: &Args,
     reader: &SavedReader,
@@ -208,32 +209,60 @@ fn verify_vector_stores(
     if refs.is_empty() {
         return Ok(Value::Null);
     }
+    let threads = std::env::var("SPANN_VECTOR_VERIFY_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| (1..=256).contains(n))
+        .unwrap_or(32);
     let location = vector_store_location(args)?;
     let mut verified = serde_json::Map::new();
     for (owner, r) in &refs {
         let store = VectorStoreReader::open(&location, r, 1024 * 1024 * 1024)?;
         let mut leaves: Vec<u128> = reader.leaves().filter(|l| reader.node_owner(*l) == Some(*owner)).collect();
         leaves.sort_unstable();
-        let mut rows = 0u64;
-        for chunk in leaves.chunks(64) {
+        let batches: Vec<&[u128]> = leaves.chunks(64).collect();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let verify_batch = |batch: &[u128]| -> Result<u64, String> {
             let mut keys = vec![];
             let mut ids = vec![];
-            for leaf in chunk {
-                let p = reader.posting_list(*leaf)?;
+            for leaf in batch {
+                let p = reader.posting_list(*leaf).map_err(|e| e.to_string())?;
                 for (ordinal, id) in p.ids.iter().enumerate() {
                     keys.push((*leaf, ordinal as u32));
                     ids.push(*id);
                 }
             }
             for (id, stored) in ids.iter().zip(store.get_many(&keys)?) {
-                let expected = corpus.get(*id)?;
+                let expected = corpus.get(*id).map_err(|e| e.to_string())?;
                 if stored.len() != expected.len()
                     || stored.iter().zip(expected.iter()).any(|(a, b)| a.to_bits() != b.to_bits())
                 {
-                    return Err(format!("owner {owner} vector store differs from the corpus at vector {id}").into());
+                    return Err(format!("owner {owner} vector store differs from the corpus at vector {id}"));
                 }
             }
-            rows += ids.len() as u64;
+            Ok(ids.len() as u64)
+        };
+        let counts: Vec<Result<u64, String>> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..threads.min(batches.len()).max(1))
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut rows = 0u64;
+                        loop {
+                            let b = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(batch) = batches.get(b) else { return Ok(rows) };
+                            rows += verify_batch(batch)?;
+                        }
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|w| w.join().unwrap_or_else(|_| Err("vector store verifier panicked".into())))
+                .collect()
+        });
+        let mut rows = 0u64;
+        for count in counts {
+            rows += count?;
         }
         if rows != r.rows {
             return Err(format!("owner {owner} vector store holds {} rows, postings hold {rows}", r.rows).into());

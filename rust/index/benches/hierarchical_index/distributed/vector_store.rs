@@ -45,9 +45,44 @@ pub struct VectorStoreRef {
     pub rows: u64,
     pub dimensions: usize,
     pub max_block_size_bytes: usize,
+    /// For the segmented layout: one blockfile per contiguous range of
+    /// leaves, in ascending leaf order. Empty for the single-blockfile layout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub segments: Vec<VectorStoreSegment>,
 }
 
+/// One blockfile of a segmented vector store: the leaves from `first_leaf`
+/// (a `leaf_prefix`) up to the next segment's first leaf.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VectorStoreSegment {
+    pub blockfile_id: String,
+    pub first_leaf: String,
+    pub rows: u64,
+}
+
+/// One blockfile holds every vector of the owner.
 pub const LEAF_ORDINAL_LAYOUT: &str = "arrow-blockfile-leaf-ordinal-v1";
+/// The owner's leaves are cut into contiguous ranges, each written by its own
+/// writer to its own blockfile under the same prefix. A reader joins the
+/// segments' block indexes into one, so lookups work as in the
+/// single-blockfile layout.
+pub const SEGMENTED_LEAF_ORDINAL_LAYOUT: &str = "arrow-blockfile-leaf-ordinal-segmented-v1";
+
+/// Default number of segments a save writes in parallel, overridden by
+/// `SPANN_VECTOR_STORE_WRITERS` (1 through 256). One writer writes the
+/// single-blockfile layout.
+pub const DEFAULT_VECTOR_STORE_WRITERS: usize = 32;
+
+pub fn vector_store_writers() -> Result<usize, String> {
+    match std::env::var("SPANN_VECTOR_STORE_WRITERS") {
+        Err(_) => Ok(DEFAULT_VECTOR_STORE_WRITERS),
+        Ok(v) => v
+            .parse::<usize>()
+            .ok()
+            .filter(|n| (1..=256).contains(n))
+            .ok_or_else(|| format!("SPANN_VECTOR_STORE_WRITERS must be 1 through 256, got {v:?}")),
+    }
+}
 
 /// The blockfile prefix for a leaf: fixed-width lowercase hex, so string order
 /// equals numeric order and an ordered writer can append leaves in ID order.
@@ -392,6 +427,183 @@ pub(super) fn write_owner_vectors_chunked(
     chunk_bytes: usize,
     leaves: impl IntoIterator<Item = (u128, Vec<Arc<[f32]>>)>,
 ) -> Result<VectorStoreRef, String> {
+    write_owner_vectors_chunked_results(
+        location,
+        owner,
+        dimensions,
+        max_block_size_bytes,
+        chunk_bytes,
+        leaves.into_iter().map(Ok),
+    )
+}
+
+/// Writes one owner's full vectors with `writers` writers in parallel and
+/// returns the reference.
+///
+/// `leaves` lists each leaf with its vector IDs in saved posting order, in
+/// strictly ascending leaf order. The leaves are cut into `writers`
+/// contiguous ranges of about equal vector count; each range is written by
+/// its own thread to its own blockfile (`write_owner_vectors` describes one
+/// writer's memory and flushes). Vectors are read from `vectors` one leaf at
+/// a time as the writer reaches the leaf, so no copy of the owner's vectors
+/// is built first. One writer writes the single-blockfile layout; more write
+/// the segmented layout.
+pub fn write_owner_vectors_parallel(
+    location: &VectorStoreLocation,
+    owner: u64,
+    dimensions: usize,
+    max_block_size_bytes: usize,
+    writers: usize,
+    leaves: &[(u128, &[u64])],
+    vectors: &(dyn Fn(u64) -> Result<Arc<[f32]>, String> + Sync),
+) -> Result<VectorStoreRef, String> {
+    write_owner_vectors_parallel_chunked(
+        location,
+        owner,
+        dimensions,
+        max_block_size_bytes,
+        VECTOR_WRITE_CHUNK_BYTES,
+        writers,
+        leaves,
+        vectors,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn write_owner_vectors_parallel_chunked(
+    location: &VectorStoreLocation,
+    owner: u64,
+    dimensions: usize,
+    max_block_size_bytes: usize,
+    chunk_bytes: usize,
+    writers: usize,
+    leaves: &[(u128, &[u64])],
+    vectors: &(dyn Fn(u64) -> Result<Arc<[f32]>, String> + Sync),
+) -> Result<VectorStoreRef, String> {
+    if let Some(w) = leaves.windows(2).find(|w| w[1].0 <= w[0].0) {
+        return Err(format!(
+            "leaf {} after leaf {}: leaves must be strictly ascending",
+            w[1].0, w[0].0
+        ));
+    }
+    let load = |&(leaf, ids): &(u128, &[u64])| -> Result<(u128, Vec<Arc<[f32]>>), String> {
+        Ok((leaf, ids.iter().map(|id| vectors(*id)).collect::<Result<_, _>>()?))
+    };
+    let ranges = segment_ranges(leaves, writers.max(1));
+    if ranges.len() <= 1 {
+        return write_owner_vectors_chunked_results(
+            location,
+            owner,
+            dimensions,
+            max_block_size_bytes,
+            chunk_bytes,
+            leaves.iter().map(load),
+        );
+    }
+    let written: Vec<Result<WrittenSegment, String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = ranges
+            .iter()
+            .map(|range| {
+                let range = &leaves[range.clone()];
+                let load = &load;
+                scope.spawn(move || {
+                    write_segment(
+                        location,
+                        owner,
+                        dimensions,
+                        max_block_size_bytes,
+                        chunk_bytes,
+                        range.iter().map(load),
+                    )
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err("vector store writer panicked".into())))
+            .collect()
+    });
+    let mut segments = Vec::with_capacity(written.len());
+    for (range, segment) in ranges.iter().zip(written) {
+        let segment = segment?;
+        segments.push(VectorStoreSegment {
+            blockfile_id: segment.blockfile_id.to_string(),
+            first_leaf: leaf_prefix(leaves[range.start].0),
+            rows: segment.rows,
+        });
+    }
+    Ok(VectorStoreRef {
+        kind: SEGMENTED_LEAF_ORDINAL_LAYOUT.to_string(),
+        blockfile_id: segments[0].blockfile_id.clone(),
+        prefix_path: location.owner_prefix_path(owner),
+        owner,
+        rows: segments.iter().map(|s| s.rows).sum(),
+        dimensions,
+        max_block_size_bytes,
+        segments,
+    })
+}
+
+fn write_owner_vectors_chunked_results(
+    location: &VectorStoreLocation,
+    owner: u64,
+    dimensions: usize,
+    max_block_size_bytes: usize,
+    chunk_bytes: usize,
+    leaves: impl Iterator<Item = Result<(u128, Vec<Arc<[f32]>>), String>>,
+) -> Result<VectorStoreRef, String> {
+    let segment = write_segment(location, owner, dimensions, max_block_size_bytes, chunk_bytes, leaves)?;
+    Ok(VectorStoreRef {
+        kind: LEAF_ORDINAL_LAYOUT.to_string(),
+        blockfile_id: segment.blockfile_id.to_string(),
+        prefix_path: location.owner_prefix_path(owner),
+        owner,
+        rows: segment.rows,
+        dimensions,
+        max_block_size_bytes,
+        segments: vec![],
+    })
+}
+
+/// Cuts the non-empty leaves into at most `writers` contiguous index ranges
+/// of about equal vector count. Empty leaves stay in whichever range covers
+/// them; a writer skips them.
+fn segment_ranges(leaves: &[(u128, &[u64])], writers: usize) -> Vec<std::ops::Range<usize>> {
+    let total: usize = leaves.iter().map(|(_, ids)| ids.len()).sum();
+    if total == 0 {
+        return vec![0..leaves.len()];
+    }
+    let target = total.div_ceil(writers);
+    let mut ranges = vec![];
+    let mut start = 0;
+    let mut rows = 0;
+    for (i, (_, ids)) in leaves.iter().enumerate() {
+        if rows >= target && !ids.is_empty() {
+            ranges.push(start..i);
+            start = i;
+            rows = 0;
+        }
+        rows += ids.len();
+    }
+    ranges.push(start..leaves.len());
+    ranges
+}
+
+struct WrittenSegment {
+    blockfile_id: Uuid,
+    rows: u64,
+}
+
+/// Writes one range of leaves to its own blockfile, with its own storage
+/// client and provider, committing and forking every `chunk_bytes`.
+fn write_segment(
+    location: &VectorStoreLocation,
+    owner: u64,
+    dimensions: usize,
+    max_block_size_bytes: usize,
+    chunk_bytes: usize,
+    leaves: impl Iterator<Item = Result<(u128, Vec<Arc<[f32]>>), String>>,
+) -> Result<WrittenSegment, String> {
     if dimensions == 0 {
         return Err("vector store requires nonzero dimensions".into());
     }
@@ -410,7 +622,8 @@ pub(super) fn write_owner_vectors_chunked(
     let mut previous: Option<u128> = None;
     let mut rows = 0u64;
 
-    for (leaf, vectors) in leaves {
+    for leaf in leaves {
+        let (leaf, vectors) = leaf?;
         if let Some(previous) = previous.filter(|&p| leaf <= p) {
             return Err(format!(
                 "leaf {leaf} after leaf {previous}: leaves must be strictly ascending"
@@ -463,15 +676,7 @@ pub(super) fn write_owner_vectors_chunked(
             rt.block_on(commit_and_flush(w))?
         }
     };
-    Ok(VectorStoreRef {
-        kind: LEAF_ORDINAL_LAYOUT.to_string(),
-        blockfile_id: blockfile_id.to_string(),
-        prefix_path,
-        owner,
-        rows,
-        dimensions,
-        max_block_size_bytes,
-    })
+    Ok(WrittenSegment { blockfile_id, rows })
 }
 
 async fn open_writer(
@@ -530,9 +735,21 @@ impl VectorStoreReader {
         reference: &VectorStoreRef,
         cache_bytes: u64,
     ) -> Result<Self, String> {
-        if reference.kind != LEAF_ORDINAL_LAYOUT {
-            return Err(format!("unknown vector store layout {:?}", reference.kind));
-        }
+        let segments: Vec<(Uuid, (u128, u32), u64)> = match reference.kind.as_str() {
+            LEAF_ORDINAL_LAYOUT if reference.segments.is_empty() => {
+                vec![(parse_blockfile_id(&reference.blockfile_id)?, (0, 0), reference.rows)]
+            }
+            SEGMENTED_LEAF_ORDINAL_LAYOUT if !reference.segments.is_empty() => reference
+                .segments
+                .iter()
+                .map(|s| {
+                    let first = u128::from_str_radix(&s.first_leaf, 16)
+                        .map_err(|e| format!("vector segment first leaf {:?}: {e}", s.first_leaf))?;
+                    Ok((parse_blockfile_id(&s.blockfile_id)?, (first, 0), s.rows))
+                })
+                .collect::<Result<_, String>>()?,
+            kind => return Err(format!("unknown vector store layout {kind:?}")),
+        };
         if reference.dimensions == 0 {
             return Err("vector store reference has zero dimensions".into());
         }
@@ -543,8 +760,6 @@ impl VectorStoreReader {
                 reference.prefix_path, reference.owner, expected_prefix
             ));
         }
-        let blockfile_id = Uuid::parse_str(&reference.blockfile_id)
-            .map_err(|e| format!("vector blockfile id {:?}: {e}", reference.blockfile_id))?;
         let rt = runtime();
         let store = rt.block_on(VectorStoreProvider::open(
             location,
@@ -554,39 +769,55 @@ impl VectorStoreReader {
         let mut reader = Self {
             store,
             index: BlockIndex::default(),
-            blockfile_id,
+            blockfile_id: segments[0].0,
             prefix_path: reference.prefix_path.clone(),
             dimensions: reference.dimensions,
             rows: reference.rows,
         };
-        let count = rt.block_on(reader.count())?;
-        reader.index = rt.block_on(reader.blockfile())?.block_index().try_into()?;
-        if count as u64 != reader.rows {
+        // Segments hold ascending, disjoint leaf ranges, so their block
+        // indexes join in order. A segment's first block starts at the
+        // smallest key (stored as no start); after the first segment it
+        // starts at the segment's first leaf.
+        let mut total = 0u64;
+        for (k, (id, first, rows)) in segments.iter().enumerate() {
+            let (count, mut index) = rt.block_on(async {
+                let blockfile = reader.segment(*id).await?;
+                let count = blockfile
+                    .count()
+                    .await
+                    .map_err(|e| format!("count vector blockfile {id}: {e}"))?;
+                Ok::<_, String>((count, BlockIndex::try_from(blockfile.block_index())?))
+            })?;
+            if count as u64 != *rows {
+                return Err(format!("vector blockfile {id} holds {count} rows, reference says {rows}"));
+            }
+            if k > 0 && index.starts[0] == (0, 0) {
+                index.starts[0] = *first;
+            }
+            reader.index.append(index)?;
+            total += rows;
+        }
+        if total != reader.rows {
             return Err(format!(
-                "vector blockfile holds {count} rows, reference says {}",
+                "vector blockfile holds {total} rows, reference says {}",
                 reader.rows
             ));
         }
         Ok(reader)
     }
 
-    async fn count(&self) -> Result<usize, String> {
-        let reader = self.blockfile().await?;
-        reader
-            .count()
-            .await
-            .map_err(|e| format!("count vector blockfile: {e}"))
-    }
-
-    async fn blockfile(&self) -> Result<BlockfileReader<'_, u32, &'_ [f32]>, String> {
+    async fn segment(&self, id: Uuid) -> Result<BlockfileReader<'_, u32, &'_ [f32]>, String> {
         self.store
             .provider
-            .read::<u32, &[f32]>(BlockfileReaderOptions::new(
-                self.blockfile_id,
-                self.prefix_path.clone(),
-            ))
+            .read::<u32, &[f32]>(BlockfileReaderOptions::new(id, self.prefix_path.clone()))
             .await
-            .map_err(|e| format!("open vector blockfile {}: {e}", self.blockfile_id))
+            .map_err(|e| format!("open vector blockfile {id}: {e}"))
+    }
+
+    /// A reader for the first segment. Blocks load by ID from the shared
+    /// prefix, so it fetches any segment's blocks.
+    async fn blockfile(&self) -> Result<BlockfileReader<'_, u32, &'_ [f32]>, String> {
+        self.segment(self.blockfile_id).await
     }
 
     pub fn dimensions(&self) -> usize {
@@ -787,6 +1018,10 @@ impl VectorStoreReader {
     }
 }
 
+fn parse_blockfile_id(id: &str) -> Result<Uuid, String> {
+    Uuid::parse_str(id).map_err(|e| format!("vector blockfile id {id:?}: {e}"))
+}
+
 /// The blockfile's sparse index in a compact form: block `i` holds the keys
 /// in `[starts[i], starts[i + 1])`, and `starts[0]` is the smallest key. One
 /// entry per block (about 60,000 for a 10M-vector owner, 2 MiB), built once
@@ -799,6 +1034,18 @@ struct BlockIndex {
 }
 
 impl BlockIndex {
+    /// Appends a later segment's index; its first start must follow ours.
+    fn append(&mut self, other: BlockIndex) -> Result<(), String> {
+        if let (Some(last), Some(first)) = (self.starts.last(), other.starts.first()) {
+            if first <= last {
+                return Err(format!("vector segment starts at {first:?}, before {last:?}"));
+            }
+        }
+        self.starts.extend(other.starts);
+        self.ids.extend(other.ids);
+        Ok(())
+    }
+
     /// The block whose range holds `key`.
     fn locate(&self, key: (u128, u32)) -> usize {
         self.starts

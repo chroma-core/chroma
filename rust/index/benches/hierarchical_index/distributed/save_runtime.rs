@@ -204,14 +204,19 @@ mod saved_chunk_base64 {
 impl OwnerService {
     /// Write this owner's full vectors, leaf by leaf in ascending leaf order
     /// and in each leaf's saved posting order, so a reader finds a vector by
-    /// its leaf and posting position.
+    /// its leaf and posting position. `SPANN_VECTOR_STORE_WRITERS` writers
+    /// write contiguous leaf ranges in parallel, each reading its vectors as
+    /// it reaches them.
     fn save_vector_store(
         &self,
         request: &SaveOwnerRequest,
         postings: &[SavedPostingList],
         reused: &BTreeMap<u128, SavedPostingBlock>,
     ) -> Result<super::vector_store::VectorStoreRef> {
-        use super::vector_store::{write_owner_vectors, VectorStoreLocation, DEFAULT_VECTOR_BLOCK_SIZE_BYTES};
+        use super::vector_store::{
+            vector_store_writers, write_owner_vectors_parallel, VectorStoreLocation,
+            DEFAULT_VECTOR_BLOCK_SIZE_BYTES,
+        };
         if !reused.is_empty() {
             return Err("a vector store needs every posting list; this save reuses unchanged blocks".into());
         }
@@ -219,14 +224,19 @@ impl OwnerService {
             Some(config) => VectorStoreLocation::Durable(config.clone()),
             None => VectorStoreLocation::Local(PathBuf::from(&request.store_root)),
         };
-        let mut order: Vec<&SavedPostingList> = postings.iter().collect();
-        order.sort_by_key(|p| p.leaf);
-        let mut leaves = Vec::with_capacity(order.len());
-        for p in order {
-            let rows = p.ids.iter().map(|id| self.vectors.get(*id)).collect::<Result<Vec<_>>>()?;
-            leaves.push((p.leaf, rows));
-        }
-        write_owner_vectors(&location, self.owner, self.dim, DEFAULT_VECTOR_BLOCK_SIZE_BYTES, leaves)
+        let mut leaves: Vec<(u128, &[u64])> = postings.iter().map(|p| (p.leaf, &p.ids[..])).collect();
+        leaves.sort_by_key(|(leaf, _)| *leaf);
+        let source = &self.vectors;
+        let vectors = |id: u64| source.get(id);
+        write_owner_vectors_parallel(
+            &location,
+            self.owner,
+            self.dim,
+            DEFAULT_VECTOR_BLOCK_SIZE_BYTES,
+            vector_store_writers()?,
+            &leaves,
+            &vectors,
+        )
     }
     pub(super) fn save_owner_runtime(
         &self,
