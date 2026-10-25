@@ -6,6 +6,7 @@ from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
+from chromadb.api.async_fastapi import AsyncFastAPI
 import pytest
 import tempfile
 import os
@@ -197,6 +198,57 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+def make_async_client_factory() -> Tuple[Callable[..., Any], Dict[str, Any]]:
+    captured: Dict[str, Any] = {}
+
+    # takes any positional args to match httpx.AsyncClient
+    def factory(*_: Any, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        mock = MagicMock()
+
+        async def aclose() -> None:
+            pass
+
+        mock.aclose = aclose  # type: ignore[method-assign]
+        return mock
+
+    return factory, captured
+
+
+@pytest.mark.parametrize(
+    "ssl_verify,verify_kwarg_present",
+    [
+        # Default: no verify kwarg, so httpx verifies certificates.
+        (None, False),
+        (True, True),
+        (False, True),
+    ],
+)
+def test_async_fastapi_ssl_verify(
+    ssl_verify: Any, verify_kwarg_present: bool
+) -> None:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+        chroma_server_ssl_verify=ssl_verify,
+    )
+    system = System(settings)
+
+    factory, captured = make_async_client_factory()
+
+    with patch.object(AsyncFastAPI, "require", return_value=MagicMock()):
+        with patch("chromadb.api.async_fastapi.httpx.AsyncClient", side_effect=factory):
+            api = AsyncFastAPI(system)
+            api._get_client()
+
+    api.stop()
+    assert captured["timeout"] is None
+    assert ("verify" in captured) == verify_kwarg_present
+    if "verify" in captured:
+        assert captured["verify"] == ssl_verify
 
 
 def test_persistent_client_close() -> None:
