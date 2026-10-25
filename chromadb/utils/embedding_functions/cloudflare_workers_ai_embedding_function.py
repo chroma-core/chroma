@@ -54,7 +54,10 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
         self.account_id = account_id
 
-        if os.getenv("CLOUDFLARE_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_CLOUDFLARE_API_KEY"
+            and os.getenv("CLOUDFLARE_API_KEY") is not None
+        ):
             self.api_key_env_var = "CLOUDFLARE_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var
