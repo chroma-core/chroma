@@ -20,6 +20,39 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant};
 
+/// Limit on chained balancing, as in the reference writer: work that a job
+/// triggers (its split children, the leaves its reassignments touch, a parent
+/// that a split overfills) is one level deeper than the job, and work deeper
+/// than this limit is dropped for the current pass. Every balancing pass
+/// starts its out-of-threshold nodes again at depth 0, so dropped work is
+/// reconsidered after the next batch has changed the tree. Without the limit
+/// a pass can chain splits and reassignments indefinitely.
+pub(super) const MAX_BALANCE_DEPTH: u32 = 4;
+thread_local! {
+    /// Depth of the balancing job running on this thread, if any.
+    static JOB_DEPTH: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
+/// Depth of the job running on this thread; 0 outside balancing.
+pub(super) fn current_depth() -> u32 {
+    JOB_DEPTH.with(|d| d.get().unwrap_or(0))
+}
+/// Depth for work the running job triggers: one deeper than the job, or 0
+/// for work that insertion or a pass start schedules.
+pub(super) fn follow_up_depth() -> u32 {
+    JOB_DEPTH.with(|d| d.get().map_or(0, |d| d.saturating_add(1)))
+}
+/// Marks a job's depth on this thread while the job runs.
+struct DepthScope(Option<u32>);
+impl DepthScope {
+    fn enter(depth: u32) -> Self {
+        Self(JOB_DEPTH.with(|d| d.replace(Some(depth))))
+    }
+}
+impl Drop for DepthScope {
+    fn drop(&mut self) {
+        JOB_DEPTH.with(|d| d.set(self.0));
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BalanceJob {
     pub envelope: Envelope,
@@ -34,6 +67,9 @@ pub struct NeighborJob {
     pub old: Vec<f32>,
     pub left: Vec<f32>,
     pub right: Vec<f32>,
+    /// Balancing depth of the split that produced this job.
+    #[serde(default)]
+    pub depth: u32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReassignJob {
@@ -45,6 +81,9 @@ pub struct ReassignJob {
     /// Exact scheduled attempts whose membership claims prevented this work.
     #[serde(default)]
     pub blocked_jobs: Vec<AttemptId>,
+    /// Balancing depth of the job whose reassignment this continues.
+    #[serde(default)]
+    pub depth: u32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum WorkJob {
@@ -348,6 +387,8 @@ impl JobQueue {
             }
             duplicates += (selected.ids.len() + other.ids.len() - union.len()) as u64;
             selected.ids = union;
+            // The combined job continues the shallower chain.
+            selected.depth = selected.depth.min(other.depth);
             merged_jobs += 1;
             false
         });
@@ -477,7 +518,13 @@ impl OwnerService {
             WorkJob::Reassign(j) => j.envelope.clone(),
         };
         let identity = bincode::serialize(&("scheduled", &job)).map_err(|e| e.to_string())?;
+        let depth = match &job {
+            WorkJob::Balance(j) => j.depth,
+            WorkJob::Neighbor(j) => j.depth,
+            WorkJob::Reassign(j) => j.depth,
+        };
         self.execute_job(&envelope, identity, || {
+            let _depth = DepthScope::enter(depth);
             let cluster = self.cluster()?;
             match job {
                 WorkJob::Balance(j) => cluster.run_job_for_producer(j, Some(envelope.attempt)),
@@ -852,7 +899,7 @@ impl OwnerService {
         self.splits.fetch_add(1, Ordering::Relaxed);
         // LIRE neighbor reassignment follows the same full-precision eligibility
         // tests and globally navigated neighbor order as the reference writer.
-        if depth < 4 {
+        if depth < MAX_BALANCE_DEPTH {
             let mut evaluated = BTreeSet::new();
             for (from, group, center) in [(a, &left_ids, &left), (b, &right_ids, &right)] {
                 let mut proposed = vec![];
@@ -888,8 +935,8 @@ impl OwnerService {
                 )?;
             }
         }
-        cluster.schedule(a, depth)?;
-        cluster.schedule(b, depth)?;
+        cluster.schedule(a, depth + 1)?;
+        cluster.schedule(b, depth + 1)?;
         Ok(())
     }
 }
@@ -977,6 +1024,23 @@ impl Cluster {
         Ok(())
     }
     pub(super) fn schedule(&self, node: NodeRef, depth: u32) -> Result<(), String> {
+        {
+            let mut accounting = self.local.observability.operation(Scope::BalanceScheduling);
+            if depth > MAX_BALANCE_DEPTH {
+                accounting.add(Counter::BalanceDepthDeferred, 1);
+                return Ok(());
+            }
+            accounting.add(
+                [
+                    Counter::BalanceScheduledDepth0,
+                    Counter::BalanceScheduledDepth1,
+                    Counter::BalanceScheduledDepth2,
+                    Counter::BalanceScheduledDepth3,
+                    Counter::BalanceScheduledDepth4,
+                ][depth as usize],
+                1,
+            );
+        }
         if node.authority != self.local.owner {
             self.enqueue(BalanceJob {
                 envelope: self
@@ -1486,6 +1550,7 @@ impl Cluster {
                             excluded,
                             blocked: vec![],
                             blocked_jobs: vec![],
+                            depth: current_depth(),
                         };
                         match self.request(
                             self.coordinator,
@@ -1546,9 +1611,9 @@ impl Cluster {
                 if local.moved > 0 {
                     completed_vectors += local.moved;
                     revalidation_deadline = Instant::now() + Duration::from_secs(5);
-                    self.schedule(source, 0)?;
+                    self.schedule(source, follow_up_depth())?;
                     for destination in local.destinations {
-                        self.schedule(destination, 0)?;
+                        self.schedule(destination, follow_up_depth())?;
                     }
                 }
                 for ids in local.retries.values() {
@@ -1599,9 +1664,9 @@ impl Cluster {
                         completed_vectors += proposed;
                         revalidation_deadline = Instant::now() + Duration::from_secs(5);
                         if !LOCAL_BULK {
-                            self.schedule(source, 0)?;
+                            self.schedule(source, follow_up_depth())?;
                             for dest in groups.keys() {
-                                self.schedule(*dest, 0)?;
+                                self.schedule(*dest, follow_up_depth())?;
                             }
                         }
                     }
@@ -1632,6 +1697,7 @@ impl Cluster {
                         excluded,
                         blocked: claimed_dependencies.iter().copied().collect(),
                         blocked_jobs: claimed_jobs.iter().copied().collect(),
+                        depth: current_depth(),
                     };
                     self.request(self.coordinator, EngineRequest::EnqueueReassign(job))?;
                 }
@@ -1676,6 +1742,7 @@ impl Cluster {
                 old: old.to_vec(),
                 left: left.to_vec(),
                 right: right.to_vec(),
+                depth: current_depth(),
             };
             self.request(self.coordinator, EngineRequest::EnqueueNeighbor(job))?;
             return Ok(());
@@ -2129,7 +2196,7 @@ impl Cluster {
             if self.current_view().value.units.get(&parent.id) == Some(&parent) {
                 self.refresh_boundary_centroid(parent)?;
             }
-            self.schedule(parent, 0)?;
+            self.schedule(parent, follow_up_depth())?;
             Ok(true)
         } else {
             let envelope = self.local.envelope(
@@ -2721,7 +2788,7 @@ impl Cluster {
                         .local
                         .envelope("balance-job", vec![(old.target.id, old.target.placement)])?,
                     node: old.target,
-                    depth: 0,
+                    depth: current_depth(),
                     internal: true,
                 })?;
             }
@@ -2734,7 +2801,7 @@ impl Cluster {
                         .local
                         .envelope("balance-job", vec![(target.id, target.placement)])?,
                     node: target,
-                    depth: 0,
+                    depth: current_depth(),
                     internal: true,
                 })?;
             }
@@ -2785,7 +2852,7 @@ impl Cluster {
             .collect::<Vec<_>>();
         if self.install_split(&old, prepared)? {
             for node in refs {
-                self.schedule(node, 0)?;
+                self.schedule(node, follow_up_depth())?;
             }
         } else {
             self.enqueue(BalanceJob {
@@ -2793,7 +2860,7 @@ impl Cluster {
                     .local
                     .envelope("balance-job", vec![(target.id, target.placement)])?,
                 node: target,
-                depth: 0,
+                depth: current_depth(),
                 internal: true,
             })?;
         }
@@ -2847,7 +2914,7 @@ impl Cluster {
         let destination = match self.node(first) {
             Ok(n) => n,
             Err(_) => {
-                self.schedule(source, 0)?;
+                self.schedule(source, current_depth())?;
                 return Ok(());
             }
         };
@@ -2862,7 +2929,7 @@ impl Cluster {
         }
         if !proposed.is_empty() {
             match self.transfer_for_job(source, first, proposed, producer) {
-                Ok(()) => self.schedule(first, 0)?,
+                Ok(()) => self.schedule(first, follow_up_depth())?,
                 Err(error)
                     if self.local.ensure_healthy().is_ok()
                         && retryable_transfer_dependency(&error) =>
@@ -2900,7 +2967,7 @@ impl Cluster {
             };
             if !postings.ids.is_empty() {
                 drop(record);
-                return self.schedule(source, 0);
+                return self.schedule(source, current_depth());
             }
             (*record.routing).clone()
         };
@@ -2915,7 +2982,7 @@ impl Cluster {
                     .local
                     .envelope("balance-job", vec![(source.id, source.placement)])?,
                 node: source,
-                depth: 0,
+                depth: current_depth(),
                 internal: false,
             })?;
         }

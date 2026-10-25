@@ -1856,6 +1856,7 @@ fn navigation_retry_snapshot_excludes_self_preserves_replay_and_releases_recipro
         excluded: None,
         blocked: vec![],
         blocked_jobs: vec![],
+        depth: 0,
     };
     let ra = retry(source, 0);
     let rb = retry(other_node, 1);
@@ -2081,6 +2082,7 @@ fn scheduler_diagnostics_partition_real_dispatch_blockers_without_mutation() {
         excluded: None,
         blocked: vec![],
         blocked_jobs: vec![active.attempt()],
+        depth: 0,
     };
     // Add already-normalized execution jobs directly to isolate eligibility.
     q.ready.push_back(WorkJob::Reassign(make_retry(BASE + 3)));
@@ -2130,4 +2132,19 @@ fn scheduler_scan_diagnostics_count_visits_without_changing_order() {
     q.finish(&selected, Ok(()));
     assert!(q.diagnostics.as_ref().unwrap().active_owners.is_empty());
     assert_eq!(q.next(2).unwrap().node().id, BASE + 1);
+}
+
+#[test]
+fn balance_depth_follows_the_running_job() {
+    assert_eq!((current_depth(), follow_up_depth()), (0, 0));
+    {
+        let _job = DepthScope::enter(2);
+        assert_eq!((current_depth(), follow_up_depth()), (2, 3));
+        {
+            let _nested = DepthScope::enter(MAX_BALANCE_DEPTH);
+            assert!(follow_up_depth() > MAX_BALANCE_DEPTH);
+        }
+        assert_eq!(current_depth(), 2);
+    }
+    assert_eq!((current_depth(), follow_up_depth()), (0, 0));
 }

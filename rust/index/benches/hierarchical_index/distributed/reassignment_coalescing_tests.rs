@@ -73,6 +73,7 @@ fn job(owner: &OwnerService, source: NodeRef, ids: Vec<u64>) -> ReassignJob {
         excluded: None,
         blocked: vec![],
         blocked_jobs: vec![],
+        depth: 0,
     }
 }
 fn enqueue(owner: &OwnerService, request: &ReassignJob) {
@@ -213,6 +214,7 @@ fn same_source_structural_and_neighbor_jobs_remain_queue_barriers() {
                 old: vec![0.; 8],
                 left: vec![0.; 8],
                 right: vec![1.; 8],
+                depth: 0,
             });
         } else {
             q.enqueue(BalanceJob {

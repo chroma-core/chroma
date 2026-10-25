@@ -332,6 +332,7 @@ fn deferred_cross_owner_dependency_preserves_ids_without_starving_other_jobs() {
         excluded: Some(donor.id),
         blocked: vec![peer.id],
         blocked_jobs: vec![held.attempt()],
+        depth: 0,
     };
     queue.enqueue_reassign(deferred.clone(), &owner).unwrap();
     queue.enqueue_reassign(deferred.clone(), &owner).unwrap();
@@ -410,6 +411,7 @@ fn reciprocal_producers_release_both_retries_and_keep_attempt_identity_across_ow
                     excluded: Some(node.id),
                     blocked: vec![other.id],
                     blocked_jobs: vec![blocked],
+                    depth: 0,
                 },
                 &owner,
             )

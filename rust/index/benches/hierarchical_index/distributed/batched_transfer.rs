@@ -656,9 +656,10 @@ impl Cluster {
             if schedule_committed {
                 // A later chunk can reject cleanly. Its retry filters out IDs
                 // already moved here, so retain balancing obligations now.
-                self.schedule(source, 0)?;
+                let depth = super::construction::follow_up_depth();
+                self.schedule(source, depth)?;
                 for target in targets {
-                    self.schedule(target, 0)?;
+                    self.schedule(target, depth)?;
                 }
             }
             #[cfg(test)]

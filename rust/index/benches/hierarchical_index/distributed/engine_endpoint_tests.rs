@@ -855,6 +855,7 @@ fn scheduler_enqueue(owner: &OwnerService, node: NodeRef, kind: usize) -> Engine
             old: vec![0.; 8],
             left: vec![0.; 8],
             right: vec![0.; 8],
+            depth: 0,
         }),
         2 => EngineRequest::EnqueueReassign(ReassignJob {
             envelope,
@@ -863,6 +864,7 @@ fn scheduler_enqueue(owner: &OwnerService, node: NodeRef, kind: usize) -> Engine
             excluded: None,
             blocked: vec![],
             blocked_jobs: vec![],
+            depth: 0,
         }),
         _ => panic!("enqueue kind"),
     }

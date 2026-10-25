@@ -88,7 +88,13 @@ counters!(
     SplitCommitted,
     SplitCommittedRows,
     SplitDiscarded,
-    SplitDiscardedRows
+    SplitDiscardedRows,
+    BalanceScheduledDepth0,
+    BalanceScheduledDepth1,
+    BalanceScheduledDepth2,
+    BalanceScheduledDepth3,
+    BalanceScheduledDepth4,
+    BalanceDepthDeferred
 );
 macro_rules! scopes {
     ($($name:ident),* $(,)?) => {
@@ -156,7 +162,8 @@ scopes!(
     ExpansionSequentialGroups,
     SharedRoutingScoring,
     SplitPreparation,
-    SplitInstallation
+    SplitInstallation,
+    BalanceScheduling
 );
 #[derive(Clone, Copy, Default, Debug, Serialize, Deserialize)]
 pub struct TimeTotal {
