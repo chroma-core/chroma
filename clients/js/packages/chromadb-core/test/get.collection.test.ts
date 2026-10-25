@@ -23,9 +23,9 @@ describe("get collections", () => {
       metadatas: METADATAS,
     });
     const results = await collection.get({ ids: ["test1"] });
-    expect(results?.ids).toHaveLength(1);
-    expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
-    expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
+    expect(results.ids).toHaveLength(1);
+    expect(results.ids).toEqual(expect.arrayContaining(["test1"]));
+    expect(results.ids).not.toContain("test2");
     expect(results.included).toEqual(
       expect.arrayContaining(["metadatas", "documents"]),
     );
@@ -33,29 +33,25 @@ describe("get collections", () => {
     const results2 = await collection.get({
       where: { test: "test1" },
     });
-    expect(results2?.ids).toHaveLength(1);
-    expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
+    expect(results2.ids).toHaveLength(1);
+    expect(results2.ids).toEqual(expect.arrayContaining(["test1"]));
   });
 
-  test("wrong code returns an error", async () => {
+  test("it should throw an error for invalid where clause", async () => {
     const collection = await client.createCollection({ name: "test" });
     await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
     });
-    try {
-      await collection.get({
+    await expect(
+      collection.get({
         where: {
           //@ts-ignore supposed to fail
           test: { $contains: "hello" },
         },
-      });
-    } catch (error: any) {
-      expect(error).toBeDefined();
-      expect(error).toBeInstanceOf(InvalidArgumentError);
-      expect(error.message).toMatchInlineSnapshot(`"Invalid where clause"`);
-    }
+      }),
+    ).rejects.toThrow(InvalidArgumentError);
   });
 
   test("it should get embedding with matching documents", async () => {
@@ -69,8 +65,8 @@ describe("get collections", () => {
     const results2 = await collection.get({
       whereDocument: { $contains: "This is a test" },
     });
-    expect(results2?.ids).toHaveLength(1);
-    expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
+    expect(results2.ids).toHaveLength(1);
+    expect(results2.ids).toEqual(expect.arrayContaining(["test1"]));
   });
 
   test("it should get records not matching", async () => {
@@ -84,11 +80,11 @@ describe("get collections", () => {
     const results2 = await collection.get({
       whereDocument: { $not_contains: "This is another" },
     });
-    expect(results2?.ids).toHaveLength(2);
-    expect(["test1", "test3"]).toEqual(expect.arrayContaining(results2.ids));
+    expect(results2.ids).toHaveLength(2);
+    expect(results2.ids).toEqual(expect.arrayContaining(["test1", "test3"]));
   });
 
-  test("test gt, lt, in a simple small way", async () => {
+  test("it should filter documents using comparison operators", async () => {
     const collection = await client.createCollection({ name: "test" });
     await collection.add({
       ids: IDS,
@@ -99,7 +95,7 @@ describe("get collections", () => {
       where: { float_value: { $gt: -1.4 } },
     });
     expect(items.ids).toHaveLength(2);
-    expect(["test2", "test3"]).toEqual(expect.arrayContaining(items.ids));
+    expect(items.ids).toEqual(expect.arrayContaining(["test2", "test3"]));
   });
 
   test("should error on non existing collection", async () => {

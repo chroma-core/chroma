@@ -18,10 +18,8 @@ describe("peek records", () => {
     const collection = await client.createCollection({ name: "test" });
     await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
     const results = await collection.peek({ limit: 2 });
-    expect(results).toBeDefined();
-    expect(typeof results).toBe("object");
-    expect(results.ids.length).toBe(2);
-    expect(["test1", "test2"]).toEqual(expect.arrayContaining(results.ids));
+    expect(results.ids).toHaveLength(2);
+    expect(results.ids).toEqual(expect.arrayContaining(["test1", "test2"]));
   });
 
   test("should error on non existing collection", async () => {
