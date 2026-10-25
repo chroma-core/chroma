@@ -125,6 +125,8 @@ const WRITER_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Maximum block loads one `get_many` or `with_rows` call keeps in flight.
 pub const MAX_CONCURRENT_BLOCK_LOADS: usize = 32;
+/// Attempts at loading one block before a read fails.
+const BLOCK_LOAD_ATTEMPTS: u32 = 4;
 const NUM_CONCURRENT_BLOCK_FLUSHES: usize = 16;
 const MIN_BLOCK_SIZE_BYTES: usize = 16 * 1024;
 const MAX_BLOCK_SIZE_BYTES: usize = 64 * 1024 * 1024;
@@ -1007,11 +1009,20 @@ impl VectorStoreReader {
             let reader = &reader;
             stream::iter(missing.iter().map(|&b| async move {
                 let id = ids[b];
-                reader
-                    .fetch_block(id)
-                    .await
-                    .map_err(|e| format!("load vector block {id}: {e}"))?
-                    .ok_or_else(|| format!("vector block {id} not found"))
+                // Storage reads fail now and then under load (a dispatch
+                // failure, a reset connection); a read is safe to repeat.
+                let mut attempt = 1;
+                loop {
+                    match reader.fetch_block(id).await {
+                        Ok(block) => break block.ok_or_else(|| format!("vector block {id} not found")),
+                        Err(e) if attempt < BLOCK_LOAD_ATTEMPTS => {
+                            eprintln!("vector block {id} load attempt {attempt} failed, retrying: {e}");
+                            tokio::time::sleep(std::time::Duration::from_millis(100 * attempt as u64)).await;
+                            attempt += 1;
+                        }
+                        Err(e) => break Err(format!("load vector block {id}: {e}")),
+                    }
+                }
             }))
             .buffered(MAX_CONCURRENT_BLOCK_LOADS)
             .try_collect()

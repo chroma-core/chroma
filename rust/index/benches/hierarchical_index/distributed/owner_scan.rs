@@ -32,6 +32,9 @@ use std::{
 
 type Result<T> = std::result::Result<T, String>;
 
+/// Attempts at one remote scan before the query fails.
+const SCAN_ATTEMPTS: u32 = 3;
+
 /// Ascending score, then ascending ID: one total order for every selection.
 fn by_score_then_id(a: &(u64, f32), b: &(u64, f32)) -> std::cmp::Ordering {
     a.1.total_cmp(&b.1).then(a.0.cmp(&b.0))
@@ -865,10 +868,20 @@ impl OwnerQuery {
                         };
                         let client_build_ns = t.elapsed().as_nanos() as u64;
                         let before = remote.client.counters();
-                        let reply: ScanReply = remote
-                            .client
-                            .call(&request, RequestClass::Data, Instant::now() + self.deadline)
-                            .map_err(|e| format!("owner {} scan failed: {e}", remote.owner))?;
+                        // A scan only reads, so a failed attempt (a reset
+                        // connection, a storage error on the owner) is retried.
+                        let mut attempt = 1;
+                        let reply: ScanReply = loop {
+                            match remote.client.call(&request, RequestClass::Data, Instant::now() + self.deadline) {
+                                Ok(reply) => break reply,
+                                Err(e) if attempt < SCAN_ATTEMPTS => {
+                                    eprintln!("owner {} scan attempt {attempt} failed, retrying: {e}", remote.owner);
+                                    std::thread::sleep(Duration::from_millis(50 * attempt as u64));
+                                    attempt += 1;
+                                }
+                                Err(e) => return Err(format!("owner {} scan failed: {e}", remote.owner)),
+                            }
+                        };
                         let call = last_call_timing();
                         let (sent, received) = delta(&remote.client.counters(), &before);
                         let decoding = Instant::now();
