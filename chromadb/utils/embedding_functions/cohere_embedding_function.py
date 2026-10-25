@@ -69,6 +69,13 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
             Embeddings for the documents.
         """
 
+        return self._embed(input, input_type="search_document")
+
+    def embed_query(self, input: Embeddable) -> Embeddings:
+        """Generate search query embeddings for text, or image embeddings for images."""
+        return self._embed(input, input_type="search_query")
+
+    def _embed(self, input: Embeddable, input_type: str) -> Embeddings:
         # Cohere works with images. if all are texts, return the embeddings for the texts
         if all(is_document(item) for item in input):
             return [
@@ -76,12 +83,12 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 for embeddings in self.client.embed(
                     texts=[str(item) for item in input],
                     model=self.model_name,
-                    input_type="search_document",
+                    input_type=input_type,
                 ).embeddings
             ]
 
         elif all(is_image(item) for item in input):
-            base64_images = []
+            base64_images: List[str] = []
             for image_np in input:
                 if not isinstance(image_np, np.ndarray):
                     raise ValueError(
