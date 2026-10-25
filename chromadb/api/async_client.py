@@ -1,11 +1,14 @@
-import httpx
+import logging
 from typing import Optional, Sequence
 from uuid import UUID
+
+import httpx
 from overrides import override
 
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
+from chromadb.api.async_fastapi import AsyncFastAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -40,6 +43,9 @@ from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
 
 
+logger = logging.getLogger(__name__)
+
+
 class AsyncClient(SharedSystemClient, AsyncClientAPI):
     """A client for Chroma. This is the main entrypoint for interacting with Chroma.
     A client internally stores its tenant and database and proxies calls to a
@@ -72,36 +78,54 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
         settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
     ) -> "AsyncClient":
         # Create an admin client for verifying that databases and tenants exist
-        self = cls(settings=settings)
-        SharedSystemClient._populate_data_from_system(self._system)
+        self = cls(settings=settings, _system=_system)
 
-        self.tenant = tenant
-        self.database = database
+        try:
+            self.tenant = tenant
+            self.database = database
 
-        # Get the root system component we want to interact with
-        self._server = self._system.instance(AsyncServerAPI)
+            # Get the root system component we want to interact with
+            self._server = self._system.instance(AsyncServerAPI)
 
-        user_identity = await self.get_user_identity()
+            user_identity = await self.get_user_identity()
 
-        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
-            user_identity,
-            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
-            user_provided_tenant=tenant,
-            user_provided_database=database,
-        )
-        if maybe_tenant:
-            self.tenant = maybe_tenant
-        if maybe_database:
-            self.database = maybe_database
+            maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+                user_identity,
+                overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+                user_provided_tenant=tenant,
+                user_provided_database=database,
+            )
+            if maybe_tenant:
+                self.tenant = maybe_tenant
+            if maybe_database:
+                self.database = maybe_database
 
-        self._admin_client = AsyncAdminClient.from_system(self._system)
-        await self._validate_tenant_database(tenant=self.tenant, database=self.database)
+            self._admin_client = AsyncAdminClient.from_system(self._system)
+            await self._validate_tenant_database(
+                tenant=self.tenant, database=self.database
+            )
 
-        self._submit_client_start_event()
+            self._submit_client_start_event()
 
-        return self
+            return self
+        except BaseException:
+            if hasattr(self, "_admin_client"):
+                SharedSystemClient._release_system_on_error(
+                    getattr(self._admin_client, "_identifier")
+                )
+            SharedSystemClient._release_system_on_error(self._identifier)
+            if hasattr(self, "_server") and isinstance(self._server, AsyncFastAPI):
+                try:
+                    await self._server._wait_for_cleanup()
+                except BaseException:
+                    logger.exception(
+                        "Failed to close async HTTP client during client rollback"
+                    )
+            raise
 
     @classmethod
     # (we can't override and use from_system() because it's synchronous)
@@ -112,7 +136,12 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         database: str = DEFAULT_DATABASE,
     ) -> "AsyncClient":
         """Create a client from an existing system. This is useful for testing and debugging."""
-        return await AsyncClient.create(tenant, database, system.settings)
+        return await cls.create(
+            tenant,
+            database,
+            system.settings,
+            _system=system,
+        )
 
     @classmethod
     @override
@@ -490,8 +519,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     @override
     async def _begin_conditional_transaction(self) -> object:
         return await (
-            self._require_http_conditional_transactions()
-            ._begin_conditional_transaction()
+            self._require_http_conditional_transactions()._begin_conditional_transaction()
         )
 
     @override
@@ -667,9 +695,18 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
     _server: AsyncServerAPI
 
-    def __init__(self, settings: Settings = Settings()) -> None:
-        super().__init__(settings)
-        self._server = self._system.instance(AsyncServerAPI)
+    def __init__(
+        self,
+        settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
+    ) -> None:
+        super().__init__(settings, _system=_system)
+        try:
+            self._server = self._system.instance(AsyncServerAPI)
+        except Exception:
+            SharedSystemClient._release_system_on_error(self._identifier)
+            raise
 
     @override
     async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
@@ -708,6 +745,5 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         cls,
         system: System,
     ) -> "AsyncAdminClient":
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(settings=system.settings)
+        instance = cls(settings=system.settings, _system=system)
         return instance

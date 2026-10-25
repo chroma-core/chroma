@@ -74,8 +74,10 @@ class Client(SharedSystemClient, ClientAPI):
         tenant: Optional[str] = DEFAULT_TENANT,
         database: Optional[str] = DEFAULT_DATABASE,
         settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
     ) -> None:
-        super().__init__(settings=settings)
+        super().__init__(settings=settings, _system=_system)
         try:
             if tenant is not None:
                 self.tenant = tenant
@@ -119,8 +121,10 @@ class Client(SharedSystemClient, ClientAPI):
             # to avoid a resource leak (the caller never receives the object to
             # call close() on it).
             if hasattr(self, "_admin_client"):
-                SharedSystemClient._release_system(self._admin_client._identifier)
-            SharedSystemClient._release_system(self._identifier)
+                SharedSystemClient._release_system_on_error(
+                    getattr(self._admin_client, "_identifier")
+                )
+            SharedSystemClient._release_system_on_error(self._identifier)
             raise
 
     @classmethod
@@ -131,8 +135,12 @@ class Client(SharedSystemClient, ClientAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> "Client":
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(tenant=tenant, database=database, settings=system.settings)
+        instance = cls(
+            tenant=tenant,
+            database=database,
+            settings=system.settings,
+            _system=system,
+        )
         return instance
 
     # endregion
@@ -545,8 +553,7 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def _begin_conditional_transaction(self) -> object:
         return (
-            self._require_http_conditional_transactions()
-            ._begin_conditional_transaction()
+            self._require_http_conditional_transactions()._begin_conditional_transaction()
         )
 
     @override
@@ -762,7 +769,9 @@ class Client(SharedSystemClient, ClientAPI):
         # Release the internal admin client's reference first, since it also
         # incremented the refcount for the shared system on creation.
         if hasattr(self, "_admin_client"):
-            SharedSystemClient._release_system(self._admin_client._identifier)
+            SharedSystemClient._release_system(
+                getattr(self._admin_client, "_identifier")
+            )
 
         # Release our own reference; stops system if this was the last client
         SharedSystemClient._release_system(self._identifier)
@@ -810,9 +819,18 @@ class AdminClient(SharedSystemClient, AdminAPI):
 
     _server: ServerAPI
 
-    def __init__(self, settings: Settings = Settings()) -> None:
-        super().__init__(settings)
-        self._server = self._system.instance(ServerAPI)
+    def __init__(
+        self,
+        settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
+    ) -> None:
+        super().__init__(settings, _system=_system)
+        try:
+            self._server = self._system.instance(ServerAPI)
+        except Exception:
+            SharedSystemClient._release_system_on_error(self._identifier)
+            raise
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
@@ -870,6 +888,5 @@ class AdminClient(SharedSystemClient, AdminAPI):
         cls,
         system: System,
     ) -> "AdminClient":
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(settings=system.settings)
+        instance = cls(settings=system.settings, _system=system)
         return instance
