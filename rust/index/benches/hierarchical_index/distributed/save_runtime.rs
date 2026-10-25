@@ -546,6 +546,17 @@ impl Cluster {
         profile.close_seal_nanos = close_seal.elapsed().as_nanos() as u64;
         let view = self.publication.view();
         let mut shared = vec![view.value.root.clone()];
+        // Before placement the whole tree is one unit whose root is the global
+        // root, and later splits under it never republish the shared view. Save
+        // the owner's current root then, or its saved children are stale.
+        let root = view.value.root.target;
+        if root.authority == self.local.owner
+            && view.value.units.values().any(|u| u.id == root.id)
+        {
+            if let Ok(resident) = self.local.resident(root) {
+                shared[0] = (*resident.read().routing).clone();
+            }
+        }
         for n in view.value.shared.values() {
             if n.target.id != shared[0].target.id {
                 shared.push(n.clone())
