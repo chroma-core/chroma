@@ -723,3 +723,50 @@ fn scan_payloads_round_trip_exact_bits_as_base64_rows() {
     let old = serde_json::json!({"query": [1, 2], "leaves": [3], "k": 1, "rerank": 0});
     assert!(serde_json::from_value::<ScanRequest>(old).is_err());
 }
+
+fn placed(reader: &Arc<SavedReader>, vectors: &Arc<MappedVectorSource>, parts: u64) -> OwnerQuery {
+    let placement = Arc::new(Placement::subtrees(reader, parts).unwrap());
+    let all: BTreeSet<u64> = placement.leaves_by_part().into_keys().collect();
+    OwnerQuery {
+        reader: reader.clone(),
+        local: Arc::new(
+            ScanEngine::with_placement(reader.clone(), placement, &all, Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX)
+                .unwrap(),
+        ),
+        local_owners: all,
+        remotes: vec![],
+        deadline: Duration::from_secs(10),
+    }
+}
+
+#[test]
+fn subtree_placement_covers_every_leaf_in_consecutive_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reader, _) = setup(dir.path());
+    let order = reader.leaves_depth_first();
+    assert_eq!(order.len(), 6);
+    for parts in 1..=6 {
+        let placement = Placement::subtrees(&reader, parts).unwrap();
+        let labels: Vec<u64> = order.iter().map(|l| placement.part(*l).unwrap()).collect();
+        assert!(labels.windows(2).all(|w| w[0] <= w[1]), "parts {parts}: {labels:?}");
+        assert_eq!(placement.leaves_by_part().len() as u64, parts, "parts {parts}: {labels:?}");
+    }
+    assert!(Placement::subtrees(&reader, 7).is_err());
+}
+
+#[test]
+fn read_time_parts_return_the_same_one_bit_results_for_any_part_count() {
+    // Without rerank, each part returns its best k by 1-bit score and the
+    // merge keeps the overall best k, so the part count cannot change results.
+    let dir = tempfile::tempdir().unwrap();
+    let (reader, vectors) = setup(dir.path());
+    let policy = ReadBeamPolicy::uniform(None, 6, 6);
+    for q in queries() {
+        let (one, _) = placed(&reader, &vectors, 1).query(&q, 5, &policy, 0).unwrap();
+        for parts in [2, 3, 6] {
+            let (got, record) = placed(&reader, &vectors, parts).query(&q, 5, &policy, 0).unwrap();
+            assert_eq!(got, one, "parts {parts}");
+            assert_eq!(record.total.leaves, 6);
+        }
+    }
+}
