@@ -9,6 +9,8 @@ These experiments ask whether a hierarchical SPANN index can serve one large cor
 - **The query machine:** navigates the routing tree for a query, scans its own part, sends one scan request to each other part's machine, and merges the results.
 - **The results:** `RESULTS.md`, with every run's full table beside its analysis.
 
+How to build and test the sharded code is in `../distributed/README.md`.
+
 ## What is here
 
 - `RESULTS.md`: the results, newest sections last. The sections from "Phase 0 of the 100B scaling study" on cover these experiments: the 1M-to-100M growth ladder, the routing stand-in for a 100B-vector tree, read-time placement, the machine-count experiments with one query machine, and the last section, where every machine coordinates queries.
