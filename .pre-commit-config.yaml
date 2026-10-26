@@ -23,12 +23,13 @@ repos:
     rev: "23.3.0"
     hooks:
       - id: black
+        exclude: "^rust/index/benches/hierarchical_index/sharded_scaling/tools/.*\\.py$"
 
   - repo: https://github.com/PyCQA/flake8
     rev: 7.0.0
     hooks:
       - id: flake8
-        exclude: "^rust/index/benches/scripts/ingest_100m_quantized_spann\\.py$"
+        exclude: "^rust/index/benches/(scripts/ingest_100m_quantized_spann\\.py|hierarchical_index/sharded_scaling/tools/.*\\.py)$"
         args:
           # I250/I251 (flake8-tidy-imports' import-alias and banned-module
           # checks) are ignored here since this only opts into the
@@ -44,7 +45,7 @@ repos:
     rev: "v1.10.0"
     hooks:
       - id: mypy
-        exclude: "^rust/index/benches/scripts/ingest_100m_quantized_spann\\.py$"
+        exclude: "^rust/index/benches/(scripts/ingest_100m_quantized_spann\\.py|hierarchical_index/sharded_scaling/tools/.*\\.py)$"
         args:
           [
             --strict,
