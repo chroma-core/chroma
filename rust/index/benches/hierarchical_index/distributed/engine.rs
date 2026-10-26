@@ -304,6 +304,19 @@ pub struct OwnerService {
     distances: AtomicU64,
 }
 
+/// Add `by` to `counter` unless that overflows, and return the value before
+/// the addition. Equivalent to `fetch_update` with `checked_add`, which newer
+/// toolchains deprecate in favor of a method older ones lack.
+fn checked_advance(counter: &AtomicU64, by: u64) -> Option<u64> {
+    let mut current = counter.load(Ordering::Relaxed);
+    loop {
+        let next = current.checked_add(by)?;
+        match counter.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(previous) => return Some(previous),
+            Err(actual) => current = actual,
+        }
+    }
+}
 impl OwnerService {
     pub fn new(
         owner: AuthorityId,
@@ -598,21 +611,14 @@ impl OwnerService {
     fn navigation_attempts(&self, count: usize) -> Result<u128, String> {
         let count = u64::try_from(count.max(1))
             .map_err(|_| "navigation batch identity capacity exhausted")?;
-        let base = self
-            .sequence
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                n.checked_add(count)
-            })
-            .map_err(|_| "navigation attempt capacity exhausted")?
+        let base = checked_advance(&self.sequence, count)
+            .ok_or("navigation attempt capacity exhausted")?
             + 1;
         Ok(((self.owner as u128) << 64) | base as u128)
     }
     pub fn attempt(&self) -> Result<AttemptId, String> {
-        let sequence = self
-            .sequence
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
-            .map_err(|_| "operation identity exhausted")?
-            + 1;
+        let sequence =
+            checked_advance(&self.sequence, 1).ok_or("operation identity exhausted")? + 1;
         Ok(AttemptId {
             authority: self.owner,
             sequence,
