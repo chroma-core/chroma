@@ -1,0 +1,6 @@
+{
+  "configurations": [
+    {"name": "beam16-rr0", "k": 10, "rerank": 0, "beam_min": 16, "beam_max": 16},
+    {"name": "beam16-rr0-k100", "k": 100, "rerank": 0, "beam_min": 16, "beam_max": 16}
+  ]
+}

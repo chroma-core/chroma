@@ -1,0 +1,8 @@
+  File "<stdin>", line 6
+    print(f"{c[\"name\"]:<32} L2 keep {L[\"kept\"]:.0f}/{L[\"scored\"]:.0f} ({100*L[\"kept\"]/L[\"scored\"]:.1f}%) reach {L[\"reach\"]:.4f}  leaf reach {w[\"leaf_reach\"]:.4f}  R {r[\"summary\"][\"recall\"]:.4f}")
+                ^
+SyntaxError: unexpected character after line continuation character
+k10-beam1024-rr10: 1000 queries, 1024 leaves each; distinct ancestors per query: depth 1: 14.4, depth 2: 162.8
+k10-beam128-rr10: 1000 queries, 128 leaves each; distinct ancestors per query: depth 1: 7.1, depth 2: 26.9
+k10-beam512-rr10: 1000 queries, 512 leaves each; distinct ancestors per query: depth 1: 12.3, depth 2: 91.3
+k100-beam1024-rr4: 1000 queries, 1024 leaves each; distinct ancestors per query: depth 1: 14.4, depth 2: 162.8

@@ -1,0 +1,60 @@
+{
+ "configurations": [
+  {
+   "name": "k10-beam4096-rr4",
+   "k": 10,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 4096
+  },
+  {
+   "name": "k10-beam4096-rr10",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 4096
+  },
+  {
+   "name": "k10-beam8192-rr4",
+   "k": 10,
+   "rerank": 4,
+   "beam_min": 8192,
+   "beam_max": 8192
+  },
+  {
+   "name": "k10-beam8192-rr10",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 8192,
+   "beam_max": 8192
+  },
+  {
+   "name": "k100-beam4096-rr2",
+   "k": 100,
+   "rerank": 2,
+   "beam_min": 4096,
+   "beam_max": 4096
+  },
+  {
+   "name": "k100-beam4096-rr4",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 4096
+  },
+  {
+   "name": "k100-beam8192-rr2",
+   "k": 100,
+   "rerank": 2,
+   "beam_min": 8192,
+   "beam_max": 8192
+  },
+  {
+   "name": "k100-beam8192-rr4",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 8192,
+   "beam_max": 8192
+  }
+ ]
+}

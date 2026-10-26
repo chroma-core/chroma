@@ -1,0 +1,164 @@
+{
+ "configurations": [
+  {
+   "name": "k10-beam512-rr10-L1cap1",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    1
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L1cap2",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    2
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L1cap4",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    4
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L1cap10",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    10
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L1cap1",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    1
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L1cap2",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    2
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L1cap4",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    4
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L1cap10",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    10
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L1cap1",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    1
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L1cap2",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    2
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L1cap4",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    4
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L1cap10",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    10
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L1cap1",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    1
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L1cap2",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    2
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L1cap4",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    4
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L1cap10",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    10
+   ]
+  }
+ ]
+}
