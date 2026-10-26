@@ -94,12 +94,22 @@ struct Args {
     config: Option<PathBuf>,
     #[arg(long)]
     query_limit: Option<usize>,
-    /// Bench: comma-separated passes per configuration, from `cold` and `warm`.
+    /// Bench: comma-separated passes per configuration, from `cold`, `warm`
+    /// and `load`. A load pass is a cold pass over the queries repeated
+    /// --load-repeats times, for throughput over a longer window.
     #[arg(long, default_value = "cold,warm")]
     passes: String,
+    #[arg(long, default_value_t = 1)]
+    load_repeats: usize,
     /// Bench: threads for the cold pass, which fills caches in parallel.
     #[arg(long, default_value_t = 32)]
     cold_threads: usize,
+    /// Bench: before each pass, write `ready-<step>` in this directory and
+    /// wait for `go-<step>`, which holds the Unix time at which to start, so
+    /// benches on several machines start each pass together. Steps count
+    /// passes across configurations from 0.
+    #[arg(long)]
+    pass_barrier: Option<PathBuf>,
     /// Bench: skip the corpus; only rerank 0 can run, and recall cannot
     /// resolve ties that continue past the listed references.
     #[arg(long)]
@@ -173,12 +183,40 @@ struct Args {
     /// least --cold-threads, or remote requests queue for a worker.
     #[arg(long, default_value_t = 64)]
     remote_workers: usize,
+    /// Scan requests a server runs at once. A server answering several query
+    /// machines needs their combined --cold-threads.
+    #[arg(long, default_value_t = 64)]
+    scan_handlers: usize,
 }
 fn transport_config(args: &Args) -> TransportConfig {
     TransportConfig {
         max_operation_time: Duration::from_secs(args.scan_timeout_seconds),
+        max_data_handlers: args.scan_handlers,
         ..TransportConfig::default()
     }
+}
+fn unix_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(f64::NAN)
+}
+/// Announce that this bench is ready for `step` and sleep until the start
+/// time the driver writes for it.
+fn pass_barrier(dir: &std::path::Path, step: usize) -> Result<(), String> {
+    fs::write(dir.join(format!("ready-{step}")), b"").map_err(|e| format!("pass barrier: {e}"))?;
+    let go = dir.join(format!("go-{step}"));
+    let start: f64 = loop {
+        match fs::read_to_string(&go) {
+            Ok(text) if !text.trim().is_empty() => break text.trim().parse().map_err(|e| format!("pass barrier start time: {e}"))?,
+            _ => std::thread::sleep(Duration::from_millis(5)),
+        }
+    };
+    let wait = start - unix_now();
+    if wait > 0.0 {
+        std::thread::sleep(Duration::from_secs_f64(wait));
+    }
+    Ok(())
 }
 fn open_reader(
     args: &Args,
@@ -561,6 +599,7 @@ fn run_query(
     Ok(json!({
         "config": cx.config.name, "pass": pass, "query_index": index, "query_id": q.id,
         "seconds": a.seconds,
+        "finished_unix": unix_now(),
         "cpu_seconds": if alone { json!(cpu) } else { Value::Null },
         "recall": recall, "recall_fraction": recall.fraction(),
         "ids": ids, "distances": a.results.iter().map(|(_, d)| *d).collect::<Vec<_>>(),
@@ -871,19 +910,30 @@ fn open_mapped(
 /// index. Plain threads matter: a rayon worker that blocks on another pool
 /// runs other queued queries meanwhile, so in-flight requests would exceed the
 /// thread count and the scan server's limit.
-fn cold_pass(cx: &BenchContext, queries: &[BenchQuery], threads: usize) -> Result<Vec<Value>, String> {
+/// `repeats` runs the query list that many times in a row.
+fn cold_pass(
+    cx: &BenchContext,
+    queries: &[BenchQuery],
+    threads: usize,
+    pass: &str,
+    repeats: usize,
+) -> Result<Vec<Value>, String> {
     let next = std::sync::atomic::AtomicUsize::new(0);
     let alone = threads == 1;
-    let mut out: Vec<Option<Value>> = vec![None; queries.len()];
+    let total = queries.len() * repeats;
+    let mut out: Vec<Option<Value>> = vec![None; total];
     let results = std::thread::scope(|scope| {
-        let workers: Vec<_> = (0..threads.min(queries.len()))
+        let workers: Vec<_> = (0..threads.min(total))
             .map(|_| {
                 scope.spawn(|| -> Result<Vec<(usize, Value)>, String> {
                     let mut done = vec![];
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(q) = queries.get(i) else { return Ok(done) };
-                        done.push((i, run_query(cx, i, q, "cold", alone)?));
+                        if i >= total {
+                            return Ok(done);
+                        }
+                        let q = &queries[i % queries.len()];
+                        done.push((i, run_query(cx, i % queries.len(), q, pass, alone)?));
                     }
                 })
             })
@@ -905,8 +955,8 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         return Err("bench mode needs --queries, --groundtruth and --config".into());
     };
     let passes: Vec<&str> = args.passes.split(',').map(str::trim).collect();
-    if passes.iter().any(|p| !matches!(*p, "cold" | "warm")) || args.cold_threads == 0 {
-        return Err("passes must be cold and/or warm, with at least one cold thread".into());
+    if passes.iter().any(|p| !matches!(*p, "cold" | "warm" | "load")) || args.cold_threads == 0 || args.load_repeats == 0 {
+        return Err("passes must be cold, warm or load, with at least one cold thread and one load repeat".into());
     }
     let configs = rb::load_configs(config_path)?;
     if args.no_vectors && args.full_vectors == FullVectorSource::Corpus && configs.iter().any(|c| c.rerank > 0) {
@@ -1000,8 +1050,8 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             if !owner_query.as_ref().unwrap().remotes.is_empty() && args.remote_workers < args.cold_threads {
                 return Err("--remote-workers must be at least --cold-threads, or remote requests queue for a worker".into());
             }
-            if !owner_query.as_ref().unwrap().remotes.is_empty() && args.cold_threads > 64 {
-                return Err("the scan server accepts at most 64 requests at once; use --cold-threads 64 or fewer".into());
+            if !owner_query.as_ref().unwrap().remotes.is_empty() && args.cold_threads > args.scan_handlers {
+                return Err("each scan server must accept --cold-threads requests at once; raise --scan-handlers on every server".into());
             }
             mapped = vectors;
         }
@@ -1029,6 +1079,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut records = BufWriter::new(File::create(args.output.join("queries.jsonl"))?);
     let mut summaries = vec![];
+    let mut step = 0;
     for config in &configs {
         let runner = match &owner_query {
             Some(query) => Runner::Owners {
@@ -1058,15 +1109,18 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             record_leaves: args.record_leaves,
         };
         for &pass in &passes {
+            if let Some(dir) = &args.pass_barrier {
+                pass_barrier(dir, step)?;
+            }
+            step += 1;
             let network = rb::network_received_bytes();
             let usage = rb::ProcessUsage::now();
-            let started_unix = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs_f64())
-                .unwrap_or(f64::NAN);
+            let started_unix = unix_now();
             let t = Instant::now();
             let results: Vec<Value> = if pass == "cold" {
-                cold_pass(&cx, &queries, args.cold_threads)?
+                cold_pass(&cx, &queries, args.cold_threads, pass, 1)?
+            } else if pass == "load" {
+                cold_pass(&cx, &queries, args.cold_threads, pass, args.load_repeats)?
             } else {
                 queries
                     .iter()
