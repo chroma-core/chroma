@@ -114,7 +114,11 @@ impl SplitProfile {
                 ..Default::default()
             },
             start: std::time::Instant::now(),
-            cpu: if SPLIT_PROFILING { clustering_thread_cpu_nanos() } else { None },
+            cpu: if SPLIT_PROFILING {
+                clustering_thread_cpu_nanos()
+            } else {
+                None
+            },
         }
     }
 }

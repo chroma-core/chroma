@@ -5,7 +5,7 @@
 //! leaf scans for one owner, so a bench process on another machine can read a
 //! replicated routing tree and spread the scans across owners.
 #![recursion_limit = "256"]
-#![allow(unexpected_cfgs, dead_code)]
+#![allow(unexpected_cfgs, dead_code, unused_imports, clippy::all)]
 mod hierarchical_index;
 use clap::Parser;
 use hierarchical_index::{
@@ -15,7 +15,9 @@ use hierarchical_index::{
         generation::{GenerationDescriptor, GenerationStore},
         generation_backend::DurableStoreConfig,
         mapped_vectors::MappedVectorSource,
-        owner_scan::{self, FullVectors, OwnerQuery, Placement, RemoteOwner, ScanEngine, ScanRequest},
+        owner_scan::{
+            self, FullVectors, OwnerQuery, Placement, RemoteOwner, ScanEngine, ScanRequest,
+        },
         reader_bench::{self as rb, BenchConfig, BenchQuery},
         saved_reader::{CanonicalVectorSource, SavedReader},
         transport::{RpcClient, RpcServer, TransportConfig},
@@ -208,7 +210,12 @@ fn pass_barrier(dir: &std::path::Path, step: usize) -> Result<(), String> {
     let go = dir.join(format!("go-{step}"));
     let start: f64 = loop {
         match fs::read_to_string(&go) {
-            Ok(text) if !text.trim().is_empty() => break text.trim().parse().map_err(|e| format!("pass barrier start time: {e}"))?,
+            Ok(text) if !text.trim().is_empty() => {
+                break text
+                    .trim()
+                    .parse()
+                    .map_err(|e| format!("pass barrier start time: {e}"))?
+            }
             _ => std::thread::sleep(Duration::from_millis(5)),
         }
     };
@@ -260,7 +267,10 @@ fn verify_vector_stores(
     let mut verified = serde_json::Map::new();
     for (owner, r) in &refs {
         let store = VectorStoreReader::open(&location, r, 1024 * 1024 * 1024)?;
-        let mut leaves: Vec<u128> = reader.leaves().filter(|l| reader.node_owner(*l) == Some(*owner)).collect();
+        let mut leaves: Vec<u128> = reader
+            .leaves()
+            .filter(|l| reader.node_owner(*l) == Some(*owner))
+            .collect();
         leaves.sort_unstable();
         let batches: Vec<&[u128]> = leaves.chunks(64).collect();
         let next = std::sync::atomic::AtomicUsize::new(0);
@@ -277,9 +287,14 @@ fn verify_vector_stores(
             for (id, stored) in ids.iter().zip(store.get_many(&keys)?) {
                 let expected = corpus.get(*id).map_err(|e| e.to_string())?;
                 if stored.len() != expected.len()
-                    || stored.iter().zip(expected.iter()).any(|(a, b)| a.to_bits() != b.to_bits())
+                    || stored
+                        .iter()
+                        .zip(expected.iter())
+                        .any(|(a, b)| a.to_bits() != b.to_bits())
                 {
-                    return Err(format!("owner {owner} vector store differs from the corpus at vector {id}"));
+                    return Err(format!(
+                        "owner {owner} vector store differs from the corpus at vector {id}"
+                    ));
                 }
             }
             Ok(ids.len() as u64)
@@ -291,7 +306,9 @@ fn verify_vector_stores(
                         let mut rows = 0u64;
                         loop {
                             let b = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            let Some(batch) = batches.get(b) else { return Ok(rows) };
+                            let Some(batch) = batches.get(b) else {
+                                return Ok(rows);
+                            };
                             rows += verify_batch(batch)?;
                         }
                     })
@@ -299,7 +316,10 @@ fn verify_vector_stores(
                 .collect();
             workers
                 .into_iter()
-                .map(|w| w.join().unwrap_or_else(|_| Err("vector store verifier panicked".into())))
+                .map(|w| {
+                    w.join()
+                        .unwrap_or_else(|_| Err("vector store verifier panicked".into()))
+                })
                 .collect()
         });
         let mut rows = 0u64;
@@ -307,7 +327,11 @@ fn verify_vector_stores(
             rows += count?;
         }
         if rows != r.rows {
-            return Err(format!("owner {owner} vector store holds {} rows, postings hold {rows}", r.rows).into());
+            return Err(format!(
+                "owner {owner} vector store holds {} rows, postings hold {rows}",
+                r.rows
+            )
+            .into());
         }
         verified.insert(owner.to_string(), json!({"rows": rows, "store": r}));
     }
@@ -453,8 +477,13 @@ fn answer(cx: &BenchContext, q: &BenchQuery, alone: bool) -> Result<Answer, Stri
                 Some(v) => {
                     let d = v.descriptor();
                     let row = d.dimensions as u64 * 4;
-                    let pages =
-                        rb::distinct_pages(&touched, d.first_id, d.offset_bytes, d.stride_bytes, row);
+                    let pages = rb::distinct_pages(
+                        &touched,
+                        d.first_id,
+                        d.offset_bytes,
+                        d.stride_bytes,
+                        row,
+                    );
                     (row, pages)
                 }
                 None => (0, 0),
@@ -583,7 +612,10 @@ fn run_query(
             let (leaves, frontiers) = reader.navigate_traced(&q.vector, &cx.policy)?;
             let leaves: Vec<u128> = leaves.iter().map(|(n, _)| n.id).collect();
             if cx.record_leaves {
-                leaf_ids = json!(leaves.iter().map(|l| format!("{l:032x}")).collect::<Vec<_>>());
+                leaf_ids = json!(leaves
+                    .iter()
+                    .map(|l| format!("{l:032x}"))
+                    .collect::<Vec<_>>());
             }
             let truth: Vec<(u64, u128)> = q
                 .truth_ids
@@ -595,7 +627,9 @@ fn run_query(
         }
         None => Value::Null,
     };
-    let recall = rb::tie_aware_recall(&ids, q, cx.config.k, &mut |id| cx.runner.exact(id, &q.vector))?;
+    let recall = rb::tie_aware_recall(&ids, q, cx.config.k, &mut |id| {
+        cx.runner.exact(id, &q.vector)
+    })?;
     Ok(json!({
         "config": cx.config.name, "pass": pass, "query_index": index, "query_id": q.id,
         "seconds": a.seconds,
@@ -625,7 +659,11 @@ const BYTE_FIELDS: [&str; 10] = [
 ];
 /// Means of the per-query walk diagnostics, level by level.
 fn walk_summary(records: &[Value]) -> Value {
-    let walks: Vec<&Value> = records.iter().map(|r| &r["walk"]).filter(|w| !w.is_null()).collect();
+    let walks: Vec<&Value> = records
+        .iter()
+        .map(|r| &r["walk"])
+        .filter(|w| !w.is_null())
+        .collect();
     if walks.is_empty() {
         return Value::Null;
     }
@@ -633,7 +671,11 @@ fn walk_summary(records: &[Value]) -> Value {
         let v: Vec<f64> = walks.iter().filter_map(|w| f(w)).collect();
         (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
     };
-    let depth = walks.iter().map(|w| w["levels"].as_array().map_or(0, |l| l.len())).max().unwrap_or(0);
+    let depth = walks
+        .iter()
+        .map(|w| w["levels"].as_array().map_or(0, |l| l.len()))
+        .max()
+        .unwrap_or(0);
     let levels: Vec<Value> = (0..depth)
         .map(|i| {
             let at = |key: &'static str| mean(&|w: &Value| w["levels"].get(i)?.get(key)?.as_f64());
@@ -682,7 +724,9 @@ fn exact_ranking_report(
             .map(|beam| {
                 let share = ranks
                     .iter()
-                    .map(|r| r.iter().take(k).filter(|rank| **rank < *beam).count() as f64 / k as f64)
+                    .map(|r| {
+                        r.iter().take(k).filter(|rank| **rank < *beam).count() as f64 / k as f64
+                    })
                     .sum::<f64>()
                     / ranks.len().max(1) as f64;
                 json!({"beam": beam, "leaf_reach": share})
@@ -707,7 +751,9 @@ fn exact_ranking_report(
             json!({"coverage": coverage, "leaves_for_95pct": needed(0.95), "leaves_for_all": needed(1.0)}),
         );
     }
-    Ok(json!({"leaves": leaves.len(), "queries": queries.len(), "seconds": t.elapsed().as_secs_f64(), "by_k": by_k}))
+    Ok(
+        json!({"leaves": leaves.len(), "queries": queries.len(), "seconds": t.elapsed().as_secs_f64(), "by_k": by_k}),
+    )
 }
 /// Map every listed true neighbor of the loaded queries to its leaf, by
 /// scanning each posting list once. Loaded from `path` when it exists.
@@ -716,7 +762,10 @@ fn gt_leaf_map(
     queries: &[BenchQuery],
     path: Option<&std::path::Path>,
 ) -> Result<std::collections::HashMap<u64, u128>, Box<dyn std::error::Error>> {
-    let wanted: BTreeSet<u64> = queries.iter().flat_map(|q| q.truth_ids.iter().copied()).collect();
+    let wanted: BTreeSet<u64> = queries
+        .iter()
+        .flat_map(|q| q.truth_ids.iter().copied())
+        .collect();
     if let Some(path) = path.filter(|p| p.exists()) {
         let pairs: Vec<(u64, u128)> = serde_json::from_slice(&fs::read(path)?)?;
         let map: std::collections::HashMap<u64, u128> = pairs.into_iter().collect();
@@ -733,7 +782,9 @@ fn gt_leaf_map(
                     let mut out = vec![];
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(leaf) = leaves.get(i) else { return Ok(out) };
+                        let Some(leaf) = leaves.get(i) else {
+                            return Ok(out);
+                        };
                         for id in reader.posting_list(*leaf)?.ids {
                             if wanted.contains(&id) {
                                 out.push((id, *leaf));
@@ -745,7 +796,10 @@ fn gt_leaf_map(
             .collect();
         workers
             .into_iter()
-            .map(|w| w.join().map_err(|_| "leaf map worker panicked".to_string())?)
+            .map(|w| {
+                w.join()
+                    .map_err(|_| "leaf map worker panicked".to_string())?
+            })
             .collect::<Result<Vec<_>, String>>()
     })?;
     let pairs: Vec<(u64, u128)> = found.into_iter().flatten().collect();
@@ -762,7 +816,11 @@ fn summarize(records: &[Value], pass_seconds: f64, network: Option<u64>) -> Valu
             .filter(|x| x.is_finite())
             .collect()
     };
-    let ms = |path: &[&str]| json!(rb::stats(&field(path).iter().map(|x| x * 1e3).collect::<Vec<_>>()));
+    let ms = |path: &[&str]| {
+        json!(rb::stats(
+            &field(path).iter().map(|x| x * 1e3).collect::<Vec<_>>()
+        ))
+    };
     let stat = |path: &[&str]| json!(rb::stats(&field(path)));
     let bytes: serde_json::Map<_, _> = BYTE_FIELDS
         .iter()
@@ -806,7 +864,11 @@ fn summarize(records: &[Value], pass_seconds: f64, network: Option<u64>) -> Valu
 fn remote_breakdown_summary(records: &[Value]) -> Value {
     let Some(keys) = records
         .iter()
-        .find_map(|r| r.get("owners")?.get("remote_breakdown_seconds")?.as_object())
+        .find_map(|r| {
+            r.get("owners")?
+                .get("remote_breakdown_seconds")?
+                .as_object()
+        })
         .map(|o| o.keys().cloned().collect::<Vec<_>>())
     else {
         return Value::Null;
@@ -816,7 +878,12 @@ fn remote_breakdown_summary(records: &[Value]) -> Value {
         .map(|key| {
             let values: Vec<f64> = records
                 .iter()
-                .filter_map(|r| r.get("owners")?.get("remote_breakdown_seconds")?.get(&key)?.as_f64())
+                .filter_map(|r| {
+                    r.get("owners")?
+                        .get("remote_breakdown_seconds")?
+                        .get(&key)?
+                        .as_f64()
+                })
                 .map(|x| x * 1e3)
                 .collect();
             (key, json!(rb::stats(&values)))
@@ -834,8 +901,12 @@ fn read_token(args: &Args) -> Result<String, Box<dyn std::error::Error>> {
 }
 /// Parse OWNER@DATA_ADDR/CONTROL_ADDR.
 fn parse_remote(spec: &str) -> Result<(u64, std::net::SocketAddr, std::net::SocketAddr), String> {
-    let (owner, addrs) = spec.split_once('@').ok_or("remote needs OWNER@DATA/CONTROL")?;
-    let (data, control) = addrs.split_once('/').ok_or("remote needs OWNER@DATA/CONTROL")?;
+    let (owner, addrs) = spec
+        .split_once('@')
+        .ok_or("remote needs OWNER@DATA/CONTROL")?;
+    let (data, control) = addrs
+        .split_once('/')
+        .ok_or("remote needs OWNER@DATA/CONTROL")?;
     Ok((
         owner.parse().map_err(|_| "bad remote owner")?,
         data.parse().map_err(|_| "bad remote data address")?,
@@ -846,13 +917,18 @@ fn parse_remote(spec: &str) -> Result<(u64, std::net::SocketAddr, std::net::Sock
 /// store, otherwise the local store directory.
 fn vector_store_location(args: &Args) -> Result<VectorStoreLocation, Box<dyn std::error::Error>> {
     Ok(match &args.storage_config {
-        Some(path) => VectorStoreLocation::Durable(serde_json::from_slice::<DurableStoreConfig>(&fs::read(path)?)?),
+        Some(path) => VectorStoreLocation::Durable(serde_json::from_slice::<DurableStoreConfig>(
+            &fs::read(path)?,
+        )?),
         None => VectorStoreLocation::Local(args.store.clone()),
     })
 }
 /// The leaf placement every process of this run uses: saved owners, or
 /// --parts subtree parts.
-fn placement(args: &Args, reader: &SavedReader) -> Result<Arc<Placement>, Box<dyn std::error::Error>> {
+fn placement(
+    args: &Args,
+    reader: &SavedReader,
+) -> Result<Arc<Placement>, Box<dyn std::error::Error>> {
     Ok(Arc::new(if args.parts == 0 {
         Placement::saved(reader)
     } else {
@@ -870,10 +946,15 @@ fn open_vector_stores(
     let location = vector_store_location(args)?;
     let refs = reader.owner_vector_stores();
     let leaves = placement.leaves_of(parts);
-    let owners: BTreeSet<u64> = leaves.iter().filter_map(|l| reader.node_owner(*l)).collect();
+    let owners: BTreeSet<u64> = leaves
+        .iter()
+        .filter_map(|l| reader.node_owner(*l))
+        .collect();
     let mut stores = std::collections::BTreeMap::new();
     for owner in owners {
-        let r = refs.get(&owner).ok_or_else(|| format!("generation has no vector store for owner {owner}"))?;
+        let r = refs
+            .get(&owner)
+            .ok_or_else(|| format!("generation has no vector store for owner {owner}"))?;
         let mut store = VectorStoreReader::open(&location, r, args.vector_store_cache_bytes)?;
         if placement.kind != "saved" {
             store.restrict_to_leaves(&leaves);
@@ -892,7 +973,9 @@ fn full_vectors(
 ) -> Result<Option<FullVectors>, Box<dyn std::error::Error>> {
     Ok(match args.full_vectors {
         FullVectorSource::Corpus => mapped.map(FullVectors::Mapped),
-        FullVectorSource::Store => Some(FullVectors::Store(open_vector_stores(args, reader, placement, parts)?)),
+        FullVectorSource::Store => Some(FullVectors::Store(open_vector_stores(
+            args, reader, placement, parts,
+        )?)),
     })
 }
 fn open_mapped(
@@ -946,7 +1029,9 @@ fn cold_pass(
     for (i, v) in results.into_iter().flatten() {
         out[i] = Some(v);
     }
-    out.into_iter().map(|v| v.ok_or_else(|| "cold pass skipped a query".to_string())).collect()
+    out.into_iter()
+        .map(|v| v.ok_or_else(|| "cold pass skipped a query".to_string()))
+        .collect()
 }
 fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let (Some(queries_path), Some(truth_path), Some(config_path)) =
@@ -955,18 +1040,30 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         return Err("bench mode needs --queries, --groundtruth and --config".into());
     };
     let passes: Vec<&str> = args.passes.split(',').map(str::trim).collect();
-    if passes.iter().any(|p| !matches!(*p, "cold" | "warm" | "load")) || args.cold_threads == 0 || args.load_repeats == 0 {
-        return Err("passes must be cold, warm or load, with at least one cold thread and one load repeat".into());
+    if passes
+        .iter()
+        .any(|p| !matches!(*p, "cold" | "warm" | "load"))
+        || args.cold_threads == 0
+        || args.load_repeats == 0
+    {
+        return Err(
+            "passes must be cold, warm or load, with at least one cold thread and one load repeat"
+                .into(),
+        );
     }
     let configs = rb::load_configs(config_path)?;
-    if args.no_vectors && args.full_vectors == FullVectorSource::Corpus && configs.iter().any(|c| c.rerank > 0) {
+    if args.no_vectors
+        && args.full_vectors == FullVectorSource::Corpus
+        && configs.iter().any(|c| c.rerank > 0)
+    {
         return Err("rerank needs the corpus or --full-vectors store; drop --no-vectors".into());
     }
     let begin = Instant::now();
     let rss_before_open = mem_probe::read_self().rss;
     rb::start_heap_peak();
     let (descriptor, reader) = open_reader(args)?;
-    let routing_open_heap = json!({"live_bytes": rb::heap_live(), "peak_bytes": rb::finish_heap_peak()});
+    let routing_open_heap =
+        json!({"live_bytes": rb::heap_live(), "peak_bytes": rb::finish_heap_peak()});
     let routing_open_rss = mem_probe::read_self().rss;
     let reader = Arc::new(reader);
     let routing_open_seconds = begin.elapsed().as_secs_f64();
@@ -983,13 +1080,24 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             None => None,
         };
         for (id, parent, leaf, owner) in reader.tree_shape() {
-            if leaf { leaves += 1 } else { internal += 1 }
+            if leaf {
+                leaves += 1
+            } else {
+                internal += 1
+            }
             if let Some(out) = dump.as_mut() {
-                let posting_bytes = if leaf { reader.posting_object_bytes(id) } else { None };
-                serde_json::to_writer(&mut *out, &json!({
-                    "id": format!("{id:032x}"), "parent": parent.map(|p| format!("{p:032x}")),
-                    "leaf": leaf, "owner": owner, "posting_bytes": posting_bytes,
-                }))?;
+                let posting_bytes = if leaf {
+                    reader.posting_object_bytes(id)
+                } else {
+                    None
+                };
+                serde_json::to_writer(
+                    &mut *out,
+                    &json!({
+                        "id": format!("{id:032x}"), "parent": parent.map(|p| format!("{p:032x}")),
+                        "leaf": leaf, "owner": owner, "posting_bytes": posting_bytes,
+                    }),
+                )?;
                 out.write_all(b"\n")?;
             }
         }
@@ -1018,18 +1126,21 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             let mut remotes = vec![];
             for spec in &args.remote {
                 let (owner, data, control) = parse_remote(spec)?;
-                let client = RpcClient::new(data, control, read_token(args)?, transport_config(args))
-                    .map_err(|e| format!("{e:?}"))?;
+                let client =
+                    RpcClient::new(data, control, read_token(args)?, transport_config(args))
+                        .map_err(|e| format!("{e:?}"))?;
                 remotes.push(RemoteOwner::new(owner, client, args.remote_workers));
             }
             let placement = placement(args, &reader)?;
             let all: BTreeSet<u64> = placement.leaves_by_part().into_keys().collect();
-            let local_owners: BTreeSet<u64> = if args.local_owners.is_empty() && remotes.is_empty() {
+            let local_owners: BTreeSet<u64> = if args.local_owners.is_empty() && remotes.is_empty()
+            {
                 all
             } else {
                 args.local_owners.iter().copied().collect()
             };
-            let rerank_source = full_vectors(args, &reader, &placement, &local_owners, vectors.clone())?;
+            let rerank_source =
+                full_vectors(args, &reader, &placement, &local_owners, vectors.clone())?;
             let engine = ScanEngine::with_placement(
                 reader.clone(),
                 placement.clone(),
@@ -1047,10 +1158,14 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 deadline: Duration::from_secs(args.scan_timeout_seconds),
             });
             owner_query.as_ref().unwrap().check_owners()?;
-            if !owner_query.as_ref().unwrap().remotes.is_empty() && args.remote_workers < args.cold_threads {
+            if !owner_query.as_ref().unwrap().remotes.is_empty()
+                && args.remote_workers < args.cold_threads
+            {
                 return Err("--remote-workers must be at least --cold-threads, or remote requests queue for a worker".into());
             }
-            if !owner_query.as_ref().unwrap().remotes.is_empty() && args.cold_threads > args.scan_handlers {
+            if !owner_query.as_ref().unwrap().remotes.is_empty()
+                && args.cold_threads > args.scan_handlers
+            {
                 return Err("each scan server must accept --cold-threads requests at once; raise --scan-handlers on every server".into());
             }
             mapped = vectors;
@@ -1129,7 +1244,9 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     .collect::<Result<_, _>>()?
             };
             let seconds = t.elapsed().as_secs_f64();
-            let usage = rb::ProcessUsage::now().zip(usage).map(|(after, before)| after.since(&before, seconds));
+            let usage = rb::ProcessUsage::now()
+                .zip(usage)
+                .map(|(after, before)| after.since(&before, seconds));
             let network = rb::network_received_bytes()
                 .zip(network)
                 .map(|(after, before)| after.saturating_sub(before));
@@ -1244,7 +1361,10 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         "vector_open": vector_open,
         "pid": std::process::id(),
     });
-    fs::write(args.output.join("ready.json"), serde_json::to_vec_pretty(&ready)?)?;
+    fs::write(
+        args.output.join("ready.json"),
+        serde_json::to_vec_pretty(&ready)?,
+    )?;
     println!("{}", serde_json::to_string(&ready)?);
     loop {
         std::thread::sleep(Duration::from_secs(60));
@@ -1253,7 +1373,10 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             "transport": server.counters(),
             "rss_bytes": mem_probe::read_self().rss,
         });
-        if let Err(e) = fs::write(args.output.join("status.json"), serde_json::to_vec_pretty(&status)?) {
+        if let Err(e) = fs::write(
+            args.output.join("status.json"),
+            serde_json::to_vec_pretty(&status)?,
+        ) {
             eprintln!("status write failed: {e}");
         }
     }

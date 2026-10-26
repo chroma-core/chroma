@@ -1,7 +1,7 @@
 //! A bounded structural fixture runs the real owner service on two hosts. Every
 //! required transition has an explicit gate; missing coverage fails the fixture.
 #![recursion_limit = "256"]
-#![allow(unexpected_cfgs, dead_code)]
+#![allow(unexpected_cfgs, dead_code, unused_imports, clippy::all)]
 mod hierarchical_index;
 use chroma_distance::DistanceFunction;
 use clap::Parser;

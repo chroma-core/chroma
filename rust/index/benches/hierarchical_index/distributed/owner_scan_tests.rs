@@ -1,8 +1,8 @@
 use super::super::generation::{FormatContract, GenerationManifest, GenerationStore, RootCoverage};
 use super::super::routing::{self, Child, NodeRef, RoutingNode};
 use super::super::saved_reader::{
-    save_owner_snapshot, save_owner_snapshot_as, save_shared_routing, save_shared_routing_as, SavedLayout,
-    VectorFileDescriptor,
+    save_owner_snapshot, save_owner_snapshot_as, save_shared_routing, save_shared_routing_as,
+    SavedLayout, VectorFileDescriptor,
 };
 use super::super::transport::{RpcServer, TransportConfig};
 use super::*;
@@ -11,11 +11,25 @@ use sha2::{Digest, Sha256};
 const DIM: usize = 17;
 const TOKEN: &str = "owner-scan-test-token";
 
-fn node(id: u128, owner: u64, parent: Option<u128>, centroid: Vec<f32>, children: Vec<Child>) -> RoutingNode {
+fn node(
+    id: u128,
+    owner: u64,
+    parent: Option<u128>,
+    centroid: Vec<f32>,
+    children: Vec<Child>,
+) -> RoutingNode {
     RoutingNode {
         navigation: Default::default(),
-        target: NodeRef { id, authority: owner, placement: 9 },
-        parent: parent.map(|id| NodeRef { id, authority: 0, placement: 9 }),
+        target: NodeRef {
+            id,
+            authority: owner,
+            placement: 9,
+        },
+        parent: parent.map(|id| NodeRef {
+            id,
+            authority: 0,
+            placement: 9,
+        }),
         centroid,
         centroid_code: vec![],
         leaf: children.is_empty(),
@@ -25,7 +39,9 @@ fn node(id: u128, owner: u64, parent: Option<u128>, centroid: Vec<f32>, children
 }
 
 fn mean(rows: &[&Vec<f32>]) -> Vec<f32> {
-    (0..DIM).map(|d| rows.iter().map(|r| r[d]).sum::<f32>() / rows.len() as f32).collect()
+    (0..DIM)
+        .map(|d| rows.iter().map(|r| r[d]).sum::<f32>() / rows.len() as f32)
+        .collect()
 }
 
 /// Root -> one internal node per owner -> three leaves each -> four vectors per
@@ -34,7 +50,10 @@ fn setup(path: &std::path::Path) -> (Arc<SavedReader>, Arc<MappedVectorSource>) 
     setup_as(path, SavedLayout::V2)
 }
 
-fn setup_as(path: &std::path::Path, layout: SavedLayout) -> (Arc<SavedReader>, Arc<MappedVectorSource>) {
+fn setup_as(
+    path: &std::path::Path,
+    layout: SavedLayout,
+) -> (Arc<SavedReader>, Arc<MappedVectorSource>) {
     let store = GenerationStore::open(path).unwrap();
     let mut seed = 0x9e3779b97f4a7c15u64;
     let mut next = || {
@@ -44,9 +63,17 @@ fn setup_as(path: &std::path::Path, layout: SavedLayout) -> (Arc<SavedReader>, A
         (seed % 1000) as f32 / 1000.0
     };
     let vectors: Vec<Vec<f32>> = (0..24)
-        .map(|i| (0..DIM).map(|_| next() + if i < 12 { 0.0 } else { 1.0 }).collect())
+        .map(|i| {
+            (0..DIM)
+                .map(|_| next() + if i < 12 { 0.0 } else { 1.0 })
+                .collect()
+        })
         .collect();
-    let bytes: Vec<u8> = vectors.iter().flatten().flat_map(|x| x.to_le_bytes()).collect();
+    let bytes: Vec<u8> = vectors
+        .iter()
+        .flatten()
+        .flat_map(|x| x.to_le_bytes())
+        .collect();
     let corpus = path.join("vectors.f32");
     std::fs::write(&corpus, &bytes).unwrap();
     let descriptor = VectorFileDescriptor {
@@ -60,7 +87,12 @@ fn setup_as(path: &std::path::Path, layout: SavedLayout) -> (Arc<SavedReader>, A
         sha256: format!("{:x}", Sha256::digest(&bytes)),
         immutable_locators: vec!["fixture:owner-scan".into()],
     };
-    let vector_ref = store.put_object("vector-descriptor", &serde_json::to_vec(&descriptor).unwrap()).unwrap();
+    let vector_ref = store
+        .put_object(
+            "vector-descriptor",
+            &serde_json::to_vec(&descriptor).unwrap(),
+        )
+        .unwrap();
     let format = FormatContract {
         version: 1,
         dimensions: DIM,
@@ -93,36 +125,80 @@ fn setup_as(path: &std::path::Path, layout: SavedLayout) -> (Arc<SavedReader>, A
                 centroid: vec![],
             });
             let n = node(leaf, owner, Some(internal), centroid.clone(), vec![]);
-            children.push(Child { target: n.target, centroid, leaf: true });
+            children.push(Child {
+                target: n.target,
+                centroid,
+                leaf: true,
+            });
             nodes.push(n);
         }
         let centroid = mean(&members);
         let n = node(internal, owner, Some(1), centroid.clone(), children);
-        top.push(Child { target: n.target, centroid, leaf: false });
+        top.push(Child {
+            target: n.target,
+            centroid,
+            leaf: false,
+        });
         nodes.insert(0, n);
         owners.push(match layout {
             // The public writer saves v2.
-            SavedLayout::V2 => save_owner_snapshot(&store, "run", "save", "gen", owner, vec![internal],
-                format.clone(), &nodes, &postings, vec![vector_ref.clone()], None)
+            SavedLayout::V2 => save_owner_snapshot(
+                &store,
+                "run",
+                "save",
+                "gen",
+                owner,
+                vec![internal],
+                format.clone(),
+                &nodes,
+                &postings,
+                vec![vector_ref.clone()],
+                None,
+            )
             .unwrap(),
-            SavedLayout::V1 => save_owner_snapshot_as(SavedLayout::V1, &store, "run", "save", "gen", owner,
-                vec![internal], format.clone(), &nodes, &postings, vec![vector_ref.clone()], None,
-                &Default::default())
-            .unwrap()
-            .0,
+            SavedLayout::V1 => {
+                save_owner_snapshot_as(
+                    SavedLayout::V1,
+                    &store,
+                    "run",
+                    "save",
+                    "gen",
+                    owner,
+                    vec![internal],
+                    format.clone(),
+                    &nodes,
+                    &postings,
+                    vec![vector_ref.clone()],
+                    None,
+                    &Default::default(),
+                )
+                .unwrap()
+                .0
+            }
         });
     }
     let root = node(1, 0, None, mean(&vectors.iter().collect::<Vec<_>>()), top);
     let shared = match layout {
         SavedLayout::V2 => save_shared_routing(&store, "shared", &[root]).unwrap(),
-        SavedLayout::V1 => save_shared_routing_as(SavedLayout::V1, &store, "shared", &[root]).unwrap(),
+        SavedLayout::V1 => {
+            save_shared_routing_as(SavedLayout::V1, &store, "shared", &[root]).unwrap()
+        }
     };
     let manifest = GenerationManifest {
         run: "run".into(),
         save_attempt: "save".into(),
         generation: "gen".into(),
         format,
-        expected_roots: vec![RootCoverage { root: 100, owner: 10 }, RootCoverage { root: 101, owner: 20 }],
+        expected_roots: vec![
+            RootCoverage {
+                root: 100,
+                owner: 10,
+            },
+            RootCoverage {
+                root: 101,
+                owner: 20,
+            },
+        ],
         owners,
         shared_routing: shared,
         full_vectors: vec![vector_ref],
@@ -135,7 +211,9 @@ fn setup_as(path: &std::path::Path, layout: SavedLayout) -> (Arc<SavedReader>, A
 }
 
 fn queries() -> Vec<Vec<f32>> {
-    (0..6).map(|i| (0..DIM).map(|d| 0.1 * i as f32 + 0.03 * d as f32).collect()).collect()
+    (0..6)
+        .map(|i| (0..DIM).map(|d| 0.1 * i as f32 + 0.03 * d as f32).collect())
+        .collect()
 }
 
 #[test]
@@ -146,7 +224,8 @@ fn local_navigation_reaches_the_same_leaves_as_remote_expansion() {
         let policy = ReadBeamPolicy::uniform(None, beam, beam);
         for q in queries() {
             let (local, local_work) = reader.navigate_local(&q, &policy).unwrap();
-            let (sequential, sequential_work) = reader.navigate_local_with(&q, &policy, false).unwrap();
+            let (sequential, sequential_work) =
+                reader.navigate_local_with(&q, &policy, false).unwrap();
             assert_eq!(sequential, local);
             assert_eq!(sequential_work.distances, local_work.distances);
             let (expected, work) = routing::navigate_batch(
@@ -172,7 +251,17 @@ fn all_local(reader: &Arc<SavedReader>, vectors: &Arc<MappedVectorSource>) -> Ow
     let owners: BTreeSet<u64> = [10, 20].into();
     OwnerQuery {
         reader: reader.clone(),
-        local: Arc::new(ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap()),
+        local: Arc::new(
+            ScanEngine::new(
+                reader.clone(),
+                &owners,
+                Some(FullVectors::Mapped(vectors.clone())),
+                4,
+                3,
+                u64::MAX,
+            )
+            .unwrap(),
+        ),
         local_owners: owners,
         remotes: vec![],
         deadline: Duration::from_secs(10),
@@ -186,7 +275,9 @@ fn per_owner_scans_match_the_single_process_reader_when_rerank_covers_every_cand
     let query = all_local(&reader, &vectors);
     let policy = ReadBeamPolicy::uniform(None, 6, 6);
     for q in queries() {
-        let (expected, _) = reader.query(&q, 5, &policy, 10, Some(vectors.as_ref())).unwrap();
+        let (expected, _) = reader
+            .query(&q, 5, &policy, 10, Some(vectors.as_ref()))
+            .unwrap();
         let (got, record) = query.query(&q, 5, &policy, 10).unwrap();
         assert_eq!(got, expected);
         assert_eq!(record.total.leaves, 6);
@@ -200,29 +291,56 @@ fn cached_postings_are_fetched_once() {
     let dir = tempfile::tempdir().unwrap();
     let (reader, vectors) = setup(dir.path());
     let owners: BTreeSet<u64> = [10, 20].into();
-    let engine = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors)), 4, 3, u64::MAX).unwrap();
+    let engine = ScanEngine::new(
+        reader.clone(),
+        &owners,
+        Some(FullVectors::Mapped(vectors)),
+        4,
+        3,
+        u64::MAX,
+    )
+    .unwrap();
     let leaves: Vec<u128> = reader.leaves().collect();
     let q = &queries()[2];
     let (first, cold, _) = engine.scan(q, &leaves, 3, 2).unwrap();
     assert_eq!((cold.posting_fetches, cold.cache_hits), (6, 0));
     assert_eq!(cold.posting_bytes_fetched, cold.posting_object_bytes);
     let (second, warm, _) = engine.scan(q, &leaves, 3, 2).unwrap();
-    assert_eq!((warm.posting_fetches, warm.cache_hits, warm.posting_bytes_fetched), (0, 6, 0));
+    assert_eq!(
+        (
+            warm.posting_fetches,
+            warm.cache_hits,
+            warm.posting_bytes_fetched
+        ),
+        (0, 6, 0)
+    );
     assert_eq!(first, second);
     assert_eq!(engine.cached_bytes(), cold.posting_object_bytes);
     let small = ScanEngine::new(reader.clone(), &owners, None, 1, 1, 1).unwrap();
     let (_, w, _) = small.scan(q, &leaves, 3, 0).unwrap();
     assert_eq!(small.cached_bytes(), 0, "past the budget nothing is kept");
     assert_eq!(w.posting_fetches, 6);
-    assert!(small.scan(q, &leaves, 3, 2).is_err(), "rerank needs vectors");
+    assert!(
+        small.scan(q, &leaves, 3, 2).is_err(),
+        "rerank needs vectors"
+    );
 }
 
 #[test]
 fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
     let dir = tempfile::tempdir().unwrap();
     let (reader, vectors) = setup(dir.path());
-    let remote_engine =
-        Arc::new(ScanEngine::new(reader.clone(), &[20].into(), Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap());
+    let remote_engine = Arc::new(
+        ScanEngine::new(
+            reader.clone(),
+            &[20].into(),
+            Some(FullVectors::Mapped(vectors.clone())),
+            4,
+            3,
+            u64::MAX,
+        )
+        .unwrap(),
+    );
     let server = RpcServer::bind(
         "127.0.0.1:0".parse().unwrap(),
         "127.0.0.1:0".parse().unwrap(),
@@ -231,11 +349,26 @@ fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
         Arc::new(move |request: ScanRequest| remote_engine.handle(request)),
     )
     .unwrap();
-    let client =
-        RpcClient::new(server.data_addr(), server.control_addr(), TOKEN.into(), TransportConfig::default()).unwrap();
+    let client = RpcClient::new(
+        server.data_addr(),
+        server.control_addr(),
+        TOKEN.into(),
+        TransportConfig::default(),
+    )
+    .unwrap();
     let split = OwnerQuery {
         reader: reader.clone(),
-        local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap()),
+        local: Arc::new(
+            ScanEngine::new(
+                reader.clone(),
+                &[10].into(),
+                Some(FullVectors::Mapped(vectors.clone())),
+                4,
+                3,
+                u64::MAX,
+            )
+            .unwrap(),
+        ),
         local_owners: [10].into(),
         remotes: vec![RemoteOwner::new(20, client, 2)],
         deadline: Duration::from_secs(10),
@@ -254,12 +387,16 @@ fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
     }
     let lonely = OwnerQuery {
         reader: reader.clone(),
-        local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), None, 1, 1, u64::MAX).unwrap()),
+        local: Arc::new(
+            ScanEngine::new(reader.clone(), &[10].into(), None, 1, 1, u64::MAX).unwrap(),
+        ),
         local_owners: [10].into(),
         remotes: vec![],
         deadline: Duration::from_secs(1),
     };
-    assert!(lonely.query(&queries()[0], 4, &ReadBeamPolicy::uniform(None, 6, 6), 0).is_err());
+    assert!(lonely
+        .query(&queries()[0], 4, &ReadBeamPolicy::uniform(None, 6, 6), 0)
+        .is_err());
 }
 
 #[test]
@@ -268,14 +405,33 @@ fn parallel_leaf_scans_return_the_same_results_as_one_thread() {
     let (reader, vectors) = setup(dir.path());
     let owners: BTreeSet<u64> = [10, 20].into();
     let leaves: Vec<u128> = reader.leaves().collect();
-    let one = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 2, 1, u64::MAX).unwrap();
-    let many = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 2, 5, u64::MAX).unwrap();
+    let one = ScanEngine::new(
+        reader.clone(),
+        &owners,
+        Some(FullVectors::Mapped(vectors.clone())),
+        2,
+        1,
+        u64::MAX,
+    )
+    .unwrap();
+    let many = ScanEngine::new(
+        reader.clone(),
+        &owners,
+        Some(FullVectors::Mapped(vectors.clone())),
+        2,
+        5,
+        u64::MAX,
+    )
+    .unwrap();
     for q in queries() {
         for (k, rerank) in [(1, 0), (3, 0), (3, 1), (2, 3), (5, 4), (24, 1)] {
             let (a, wa, _) = one.scan(&q, &leaves, k, rerank).unwrap();
             let (b, wb, _) = many.scan(&q, &leaves, k, rerank).unwrap();
             assert_eq!(a, b, "k={k} rerank={rerank}");
-            assert_eq!((wa.leaves, wa.vectors, wa.reranked), (wb.leaves, wb.vectors, wb.reranked));
+            assert_eq!(
+                (wa.leaves, wa.vectors, wa.reranked),
+                (wb.leaves, wb.vectors, wb.reranked)
+            );
         }
     }
 }
@@ -288,19 +444,47 @@ fn reranking_from_the_vector_store_matches_the_mapped_corpus() {
     let location = VectorStoreLocation::Local(dir.path().join("store"));
     let mut stores = BTreeMap::new();
     for owner in [10u64, 20] {
-        let mut leaves: Vec<u128> = reader.leaves().filter(|l| reader.node_owner(*l) == Some(owner)).collect();
+        let mut leaves: Vec<u128> = reader
+            .leaves()
+            .filter(|l| reader.node_owner(*l) == Some(owner))
+            .collect();
         leaves.sort();
         let rows = leaves.iter().map(|leaf| {
             let p = reader.posting_list(*leaf).unwrap();
-            (*leaf, p.ids.iter().map(|id| Arc::<[f32]>::from(vectors.row(*id).unwrap())).collect::<Vec<_>>())
+            (
+                *leaf,
+                p.ids
+                    .iter()
+                    .map(|id| Arc::<[f32]>::from(vectors.row(*id).unwrap()))
+                    .collect::<Vec<_>>(),
+            )
         });
         let r = write_owner_vectors(&location, owner, DIM, 16 * 1024, rows).unwrap();
-        stores.insert(owner, Arc::new(VectorStoreReader::open(&location, &r, 1 << 20).unwrap()));
+        stores.insert(
+            owner,
+            Arc::new(VectorStoreReader::open(&location, &r, 1 << 20).unwrap()),
+        );
     }
     let owners: BTreeSet<u64> = [10, 20].into();
     let leaves: Vec<u128> = reader.leaves().collect();
-    let mapped = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 2, 3, u64::MAX).unwrap();
-    let stored = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Store(stores)), 2, 3, u64::MAX).unwrap();
+    let mapped = ScanEngine::new(
+        reader.clone(),
+        &owners,
+        Some(FullVectors::Mapped(vectors.clone())),
+        2,
+        3,
+        u64::MAX,
+    )
+    .unwrap();
+    let stored = ScanEngine::new(
+        reader.clone(),
+        &owners,
+        Some(FullVectors::Store(stores)),
+        2,
+        3,
+        u64::MAX,
+    )
+    .unwrap();
     for q in queries() {
         for (k, rerank) in [(3, 1), (4, 3), (10, 2)] {
             let (a, _, _) = mapped.scan(&q, &leaves, k, rerank).unwrap();
@@ -310,7 +494,10 @@ fn reranking_from_the_vector_store_matches_the_mapped_corpus() {
         }
     }
     let (_, warm, _) = stored.scan(&queries()[0], &leaves, 4, 3).unwrap();
-    assert_eq!(warm.rerank_blocks_loaded, 0, "repeat reranks hit the block cache");
+    assert_eq!(
+        warm.rerank_blocks_loaded, 0,
+        "repeat reranks hit the block cache"
+    );
 }
 
 #[test]
@@ -323,22 +510,52 @@ fn v2_scans_use_posting_centroids_and_match_v1_scores_exactly() {
     for leaf in &leaves {
         // v2 routing holds no exact centroid; scanning must read the posting's.
         assert!(v2.node_centroid(*leaf).is_none());
-        assert_eq!(v2.posting_list(*leaf).unwrap().centroid, v1.node_centroid(*leaf).unwrap());
+        assert_eq!(
+            v2.posting_list(*leaf).unwrap().centroid,
+            v1.node_centroid(*leaf).unwrap()
+        );
         assert!(v1.posting_list(*leaf).unwrap().centroid.is_empty());
     }
-    let first = ScanEngine::new(v1.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap();
-    let second = ScanEngine::new(v2.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap();
+    let first = ScanEngine::new(
+        v1.clone(),
+        &owners,
+        Some(FullVectors::Mapped(vectors.clone())),
+        4,
+        3,
+        u64::MAX,
+    )
+    .unwrap();
+    let second = ScanEngine::new(
+        v2.clone(),
+        &owners,
+        Some(FullVectors::Mapped(vectors.clone())),
+        4,
+        3,
+        u64::MAX,
+    )
+    .unwrap();
     let policy = ReadBeamPolicy::uniform(None, 3, 3);
     for q in queries() {
-        let bits = |r: Vec<(u64, f32)>| r.into_iter().map(|(id, d)| (id, d.to_bits())).collect::<Vec<_>>();
-        assert_eq!(bits(first.scan(&q, &leaves, 24, 0).unwrap().0), bits(second.scan(&q, &leaves, 24, 0).unwrap().0));
+        let bits = |r: Vec<(u64, f32)>| {
+            r.into_iter()
+                .map(|(id, d)| (id, d.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            bits(first.scan(&q, &leaves, 24, 0).unwrap().0),
+            bits(second.scan(&q, &leaves, 24, 0).unwrap().0)
+        );
         let (a, wa) = v1.navigate_local(&q, &policy).unwrap();
         let (b, wb) = v2.navigate_local(&q, &policy).unwrap();
         assert_eq!(a, b);
         assert_eq!(wa.distances, wb.distances);
         for rerank in [0, 2] {
-            let (a, _) = v1.query(&q, 5, &policy, rerank, Some(vectors.as_ref())).unwrap();
-            let (b, _) = v2.query(&q, 5, &policy, rerank, Some(vectors.as_ref())).unwrap();
+            let (a, _) = v1
+                .query(&q, 5, &policy, rerank, Some(vectors.as_ref()))
+                .unwrap();
+            let (b, _) = v2
+                .query(&q, 5, &policy, rerank, Some(vectors.as_ref()))
+                .unwrap();
             assert_eq!(bits(a), bits(b));
         }
     }
@@ -368,7 +585,11 @@ fn traced_navigation_matches_local_navigation_and_records_each_level() {
 /// allocations, every vector stored as a candidate and fixed chunks. It is
 /// the reference the fast scan must match and the baseline it is timed
 /// against.
-fn reference_scan(pool: &rayon::ThreadPool, q: &ScanQuery, leaves: &[LeafInput]) -> (Vec<Candidate>, ChunkWork) {
+fn reference_scan(
+    pool: &rayon::ThreadPool,
+    q: &ScanQuery,
+    leaves: &[LeafInput],
+) -> (Vec<Candidate>, ChunkWork) {
     let dim = q.query.len();
     let keep = q.keep;
     let threads = pool.current_num_threads();
@@ -384,10 +605,17 @@ fn reference_scan(pool: &rayon::ThreadPool, q: &ScanQuery, leaves: &[LeafInput])
                 for &slot in chunk_slots {
                     let p = &leaves[slot];
                     let centroid = p.centroid;
-                    let residual: Vec<_> = q.query.iter().zip(centroid).map(|(q, c)| q - c).collect();
+                    let residual: Vec<_> =
+                        q.query.iter().zip(centroid).map(|(q, c)| q - c).collect();
                     let norm = centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
                     let dot = centroid.iter().zip(q.query).map(|(c, q)| c * q).sum();
-                    let qq = QuantizedQuery::new(&residual, Code::<1>::packed_len(dim), norm, dot, q.q_norm);
+                    let qq = QuantizedQuery::new(
+                        &residual,
+                        Code::<1>::packed_len(dim),
+                        norm,
+                        dot,
+                        q.q_norm,
+                    );
                     distances.clear();
                     distances.resize(p.ids.len(), 0.0);
                     Code::<1>::distances_quantized_query(p.codes, q.metric, &qq, &mut distances);
@@ -397,12 +625,14 @@ fn reference_scan(pool: &rayon::ThreadPool, q: &ScanQuery, leaves: &[LeafInput])
                     cw.leaves += 1;
                     cw.vectors += p.ids.len() as u64;
                     cw.posting_bytes_scanned += p.codes.len() as u64 + p.ids.len() as u64 * 8;
-                    out.extend(p.ids.iter().zip(&distances).enumerate().map(|(ordinal, (id, d))| Candidate {
-                        id: *id,
-                        distance: *d,
-                        slot: p.slot,
-                        ordinal: ordinal as u32,
-                    }));
+                    out.extend(p.ids.iter().zip(&distances).enumerate().map(
+                        |(ordinal, (id, d))| Candidate {
+                            id: *id,
+                            distance: *d,
+                            slot: p.slot,
+                            ordinal: ordinal as u32,
+                        },
+                    ));
                     if out.len() >= keep * 2 {
                         trim(&mut out, keep);
                     }
@@ -427,7 +657,9 @@ fn reference_scan(pool: &rayon::ThreadPool, q: &ScanQuery, leaves: &[LeafInput])
 /// equal keys from different leaves may legally swap which copy survives.
 fn keys(mut c: Vec<Candidate>) -> Vec<(u32, u64)> {
     c.sort_unstable_by(candidate_order);
-    c.into_iter().map(|c| (c.distance.to_bits(), c.id)).collect()
+    c.into_iter()
+        .map(|c| (c.distance.to_bits(), c.id))
+        .collect()
 }
 
 struct Synthetic {
@@ -449,19 +681,31 @@ impl Synthetic {
             s ^= s << 17;
             (s >> 11) as f32 / (1u64 << 53) as f32 * 2.0 - 1.0
         };
-        let mut out = Synthetic { dim, centroids: vec![], ids: vec![], codes: vec![], norms: vec![] };
+        let mut out = Synthetic {
+            dim,
+            centroids: vec![],
+            ids: vec![],
+            codes: vec![],
+            norms: vec![],
+        };
         for l in 0..leaves {
             let centroid: Vec<f32> = (0..dim).map(|_| next()).collect();
             let mut codes = Vec::with_capacity(per_leaf * Code::<1>::size(dim));
             let shared: Vec<f32> = centroid.iter().map(|c| c + 0.3 * next()).collect();
             for _ in 0..per_leaf {
-                let v: Vec<f32> = if ties { shared.clone() } else { centroid.iter().map(|c| c + 0.3 * next()).collect() };
+                let v: Vec<f32> = if ties {
+                    shared.clone()
+                } else {
+                    centroid.iter().map(|c| c + 0.3 * next()).collect()
+                };
                 codes.extend_from_slice(Code::<1>::quantize(&v, &centroid).as_ref());
             }
             let ids = if ties {
                 (0..per_leaf as u64).map(|i| i % 7).collect()
             } else {
-                (0..per_leaf as u64).map(|i| (i * leaves as u64 + l as u64).wrapping_mul(0x9e37_79b9) % (1 << 40)).collect()
+                (0..per_leaf as u64)
+                    .map(|i| (i * leaves as u64 + l as u64).wrapping_mul(0x9e37_79b9) % (1 << 40))
+                    .collect()
             };
             out.norms.push(norm(&centroid));
             out.centroids.push(centroid);
@@ -483,12 +727,18 @@ impl Synthetic {
     }
     fn query(&self, seed: u64) -> Vec<f32> {
         let c = &self.centroids[seed as usize % self.centroids.len()];
-        c.iter().enumerate().map(|(d, x)| x + 0.01 * ((d as u64 * 31 + seed) % 17) as f32).collect()
+        c.iter()
+            .enumerate()
+            .map(|(d, x)| x + 0.01 * ((d as u64 * 31 + seed) % 17) as f32)
+            .collect()
     }
 }
 
 fn pool(threads: usize) -> rayon::ThreadPool {
-    rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap()
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .unwrap()
 }
 
 #[test]
@@ -506,7 +756,8 @@ fn shortlist_cutoff_matches_a_full_sort_on_ties() {
             let all: Vec<Candidate> = (0..5000)
                 .map(|o| Candidate {
                     id: next(distinct_id),
-                    distance: [0.0f32, -0.0, 1.0, 2.5, -3.0][next(5) as usize] * next(distinct_d) as f32,
+                    distance: [0.0f32, -0.0, 1.0, 2.5, -3.0][next(5) as usize]
+                        * next(distinct_d) as f32,
                     slot: 0,
                     ordinal: o,
                 })
@@ -523,7 +774,11 @@ fn shortlist_cutoff_matches_a_full_sort_on_ties() {
             let mut full = all.clone();
             full.sort_unstable_by(candidate_order);
             full.truncate(keep);
-            assert_eq!(keys(list.finish()), keys(full), "keep={keep} d={distinct_d} id={distinct_id}");
+            assert_eq!(
+                keys(list.finish()),
+                keys(full),
+                "keep={keep} d={distinct_d} id={distinct_id}"
+            );
         }
     }
     // Leaves of identical points, where every score in a leaf ties and IDs
@@ -535,11 +790,20 @@ fn shortlist_cutoff_matches_a_full_sort_on_ties() {
         let inputs = data.inputs();
         for keep in [1, 5, 13, 100, 2000] {
             let query = data.query(keep as u64);
-            let q = ScanQuery { query: &query, q_norm: norm(&query), metric: &metric, keep };
+            let q = ScanQuery {
+                query: &query,
+                q_norm: norm(&query),
+                metric: &metric,
+                keep,
+            };
             let (expected, ew) = reference_scan(&pool(1), &q, &inputs);
             for threads in [1, 3, 8] {
                 let (got, gw) = score_leaves(&pool(threads), &q, &inputs).unwrap();
-                assert_eq!(keys(got), keys(expected.clone()), "keep={keep} threads={threads}");
+                assert_eq!(
+                    keys(got),
+                    keys(expected.clone()),
+                    "keep={keep} threads={threads}"
+                );
                 assert_eq!(gw, ew);
             }
         }
@@ -566,8 +830,17 @@ fn scan_microbenchmark() {
         for _round in 0..7 {
             for (v, fast) in [false, true].into_iter().enumerate() {
                 let run = |query: &Vec<f32>| {
-                    let q = ScanQuery { query, q_norm: norm(query), metric: &metric, keep };
-                    if fast { score_leaves(&p, &q, &inputs).unwrap() } else { reference_scan(&p, &q, &inputs) }
+                    let q = ScanQuery {
+                        query,
+                        q_norm: norm(query),
+                        metric: &metric,
+                        keep,
+                    };
+                    if fast {
+                        score_leaves(&p, &q, &inputs).unwrap()
+                    } else {
+                        reference_scan(&p, &q, &inputs)
+                    }
                 };
                 for query in queries.iter().take(2) {
                     run(query);
@@ -592,7 +865,12 @@ fn scan_microbenchmark() {
             );
         }
         for query in &queries {
-            let q = ScanQuery { query, q_norm: norm(query), metric: &metric, keep };
+            let q = ScanQuery {
+                query,
+                q_norm: norm(query),
+                metric: &metric,
+                keep,
+            };
             let (a, wa) = reference_scan(&p, &q, &inputs);
             let (b, wb) = score_leaves(&p, &q, &inputs).unwrap();
             assert_eq!(keys(a), keys(b));
@@ -617,11 +895,21 @@ fn scan_rpc_loopback_cost() {
             let begin = Instant::now();
             let server = current_server_request().unwrap_or_default();
             let query: Vec<f32> = request.query.iter().map(|b| f32::from_bits(*b)).collect();
-            let results = (0..request.k as u64).map(|i| (i * 7 + request.leaves[0] as u64, query[i as usize].to_bits())).collect();
+            let results = (0..request.k as u64)
+                .map(|i| {
+                    (
+                        i * 7 + request.leaves[0] as u64,
+                        query[i as usize].to_bits(),
+                    )
+                })
+                .collect();
             Ok(ScanReply {
                 results,
                 work: ScanWork::default(),
-                timing: ScanTiming { total: 1, ..Default::default() },
+                timing: ScanTiming {
+                    total: 1,
+                    ..Default::default()
+                },
                 cpu_seconds: 0.0,
                 heap_peak_bytes: 0,
                 server,
@@ -630,7 +918,13 @@ fn scan_rpc_loopback_cost() {
         }),
     )
     .unwrap();
-    let client = RpcClient::new(server.data_addr(), server.control_addr(), TOKEN.into(), TransportConfig::default()).unwrap();
+    let client = RpcClient::new(
+        server.data_addr(),
+        server.control_addr(),
+        TOKEN.into(),
+        TransportConfig::default(),
+    )
+    .unwrap();
     let mut seed = 0x2545f4914f6cdd1du64;
     let mut next = || {
         seed ^= seed << 13;
@@ -639,8 +933,12 @@ fn scan_rpc_loopback_cost() {
         seed
     };
     let request = ScanRequest {
-        query: (0..768).map(|_| ((next() % 2000) as f32 / 1000.0 - 1.0).to_bits()).collect(),
-        leaves: (0..300).map(|_| (next() as u128) << 64 | next() as u128).collect(),
+        query: (0..768)
+            .map(|_| ((next() % 2000) as f32 / 1000.0 - 1.0).to_bits())
+            .collect(),
+        leaves: (0..300)
+            .map(|_| (next() as u128) << 64 | next() as u128)
+            .collect(),
         k: 10,
         rerank: 4,
     };
@@ -648,7 +946,13 @@ fn scan_rpc_loopback_cost() {
     for i in 0..3000 {
         let before = client.counters();
         let t = Instant::now();
-        let reply: ScanReply = client.call(&request, RequestClass::Data, Instant::now() + Duration::from_secs(5)).unwrap();
+        let reply: ScanReply = client
+            .call(
+                &request,
+                RequestClass::Data,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
         let total = t.elapsed().as_nanos() as u64;
         assert_eq!(reply.results.len(), 10);
         assert_eq!(reply.results[3].1, request.query[3]);
@@ -676,9 +980,22 @@ fn scan_rpc_loopback_cost() {
         }
     }
     let names = [
-        "round_trip", "connect", "encode", "write", "first_byte_wait", "read", "decode", "server_before_handler",
-        "  server_read", "  server_decode_queue", "  server_decode", "  server_dispatch", "  server_worker_wake",
-        "server_handler", "bytes_sent", "bytes_received",
+        "round_trip",
+        "connect",
+        "encode",
+        "write",
+        "first_byte_wait",
+        "read",
+        "decode",
+        "server_before_handler",
+        "  server_read",
+        "  server_decode_queue",
+        "  server_decode",
+        "  server_dispatch",
+        "  server_worker_wake",
+        "server_handler",
+        "bytes_sent",
+        "bytes_received",
     ];
     for (c, name) in names.iter().enumerate() {
         let mut v: Vec<u64> = rows.iter().map(|r| r[c]).collect();
@@ -699,15 +1016,27 @@ fn scan_rpc_loopback_cost() {
 #[test]
 fn scan_payloads_round_trip_exact_bits_as_base64_rows() {
     let request = ScanRequest {
-        query: vec![0, 1, 0x7f7f_ffff, 0x8000_0000, 0xffff_ffff, 1.5f32.to_bits()],
+        query: vec![
+            0,
+            1,
+            0x7f7f_ffff,
+            0x8000_0000,
+            0xffff_ffff,
+            1.5f32.to_bits(),
+        ],
         leaves: vec![0, 1, u128::MAX, (7u128 << 100) | 3],
         k: 3,
         rerank: 2,
     };
     let json = serde_json::to_value(&request).unwrap();
-    assert!(json["query_u32le_v1_base64"].is_string() && json["leaves_u128le_v1_base64"].is_string());
+    assert!(
+        json["query_u32le_v1_base64"].is_string() && json["leaves_u128le_v1_base64"].is_string()
+    );
     let back: ScanRequest = serde_json::from_value(json.clone()).unwrap();
-    assert_eq!((back.query, back.leaves, back.k, back.rerank), (request.query, request.leaves, 3, 2));
+    assert_eq!(
+        (back.query, back.leaves, back.k, back.rerank),
+        (request.query, request.leaves, 3, 2)
+    );
     let reply = ScanReply {
         results: vec![(u64::MAX, (-0.0f32).to_bits()), (9, 2.25f32.to_bits())],
         work: ScanWork::default(),
@@ -733,8 +1062,16 @@ fn placed(reader: &Arc<SavedReader>, vectors: &Arc<MappedVectorSource>, parts: u
     OwnerQuery {
         reader: reader.clone(),
         local: Arc::new(
-            ScanEngine::with_placement(reader.clone(), placement, &all, Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX)
-                .unwrap(),
+            ScanEngine::with_placement(
+                reader.clone(),
+                placement,
+                &all,
+                Some(FullVectors::Mapped(vectors.clone())),
+                4,
+                3,
+                u64::MAX,
+            )
+            .unwrap(),
         ),
         local_owners: all,
         remotes: vec![],
@@ -751,8 +1088,15 @@ fn subtree_placement_covers_every_leaf_in_consecutive_runs() {
     for parts in 1..=6 {
         let placement = Placement::subtrees(&reader, parts).unwrap();
         let labels: Vec<u64> = order.iter().map(|l| placement.part(*l).unwrap()).collect();
-        assert!(labels.windows(2).all(|w| w[0] <= w[1]), "parts {parts}: {labels:?}");
-        assert_eq!(placement.leaves_by_part().len() as u64, parts, "parts {parts}: {labels:?}");
+        assert!(
+            labels.windows(2).all(|w| w[0] <= w[1]),
+            "parts {parts}: {labels:?}"
+        );
+        assert_eq!(
+            placement.leaves_by_part().len() as u64,
+            parts,
+            "parts {parts}: {labels:?}"
+        );
     }
     assert!(Placement::subtrees(&reader, 7).is_err());
 }
@@ -765,9 +1109,13 @@ fn read_time_parts_return_the_same_one_bit_results_for_any_part_count() {
     let (reader, vectors) = setup(dir.path());
     let policy = ReadBeamPolicy::uniform(None, 6, 6);
     for q in queries() {
-        let (one, _) = placed(&reader, &vectors, 1).query(&q, 5, &policy, 0).unwrap();
+        let (one, _) = placed(&reader, &vectors, 1)
+            .query(&q, 5, &policy, 0)
+            .unwrap();
         for parts in [2, 3, 6] {
-            let (got, record) = placed(&reader, &vectors, parts).query(&q, 5, &policy, 0).unwrap();
+            let (got, record) = placed(&reader, &vectors, parts)
+                .query(&q, 5, &policy, 0)
+                .unwrap();
             assert_eq!(got, one, "parts {parts}");
             assert_eq!(record.total.leaves, 6);
         }

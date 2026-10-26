@@ -218,13 +218,16 @@ impl OwnerService {
             DEFAULT_VECTOR_BLOCK_SIZE_BYTES,
         };
         if !reused.is_empty() {
-            return Err("a vector store needs every posting list; this save reuses unchanged blocks".into());
+            return Err(
+                "a vector store needs every posting list; this save reuses unchanged blocks".into(),
+            );
         }
         let location = match &request.durable_store {
             Some(config) => VectorStoreLocation::Durable(config.clone()),
             None => VectorStoreLocation::Local(PathBuf::from(&request.store_root)),
         };
-        let mut leaves: Vec<(u128, &[u64])> = postings.iter().map(|p| (p.leaf, &p.ids[..])).collect();
+        let mut leaves: Vec<(u128, &[u64])> =
+            postings.iter().map(|p| (p.leaf, &p.ids[..])).collect();
         leaves.sort_by_key(|(leaf, _)| *leaf);
         let source = &self.vectors;
         let vectors = |id: u64| source.get(id);
@@ -570,8 +573,7 @@ impl Cluster {
         // root, and later splits under it never republish the shared view. Save
         // the owner's current root then, or its saved children are stale.
         let root = view.value.root.target;
-        if root.authority == self.local.owner
-            && view.value.units.values().any(|u| u.id == root.id)
+        if root.authority == self.local.owner && view.value.units.values().any(|u| u.id == root.id)
         {
             if let Ok(resident) = self.local.resident(root) {
                 shared[0] = (*resident.read().routing).clone();
@@ -837,7 +839,7 @@ mod tests {
     use chroma_distance::DistanceFunction;
     use chroma_index::quantization::Code;
     use std::sync::Arc;
-        #[test]
+    #[test]
     fn owner_save_writes_a_vector_store_that_matches_the_corpus() {
         let dir = tempfile::tempdir().unwrap();
         let dim = 17;
@@ -913,7 +915,9 @@ mod tests {
             .save_vector_store
             .store(true, std::sync::atomic::Ordering::Relaxed);
         let save = dir.path().join("with-vectors");
-        let descriptor = cluster.save_completed(&save, vectors.clone(), "gen", "save").unwrap();
+        let descriptor = cluster
+            .save_completed(&save, vectors.clone(), "gen", "save")
+            .unwrap();
         let reader = super::super::saved_reader::SavedReader::open(
             GenerationStore::open(&save).unwrap(),
             &descriptor,
@@ -923,7 +927,8 @@ mod tests {
         let r = stores.get(&1).expect("owner 1 saved a vector store");
         assert_eq!((r.rows, r.dimensions), (2, dim));
         let location = super::super::vector_store::VectorStoreLocation::Local(save.clone());
-        let store = super::super::vector_store::VectorStoreReader::open(&location, r, 1 << 20).unwrap();
+        let store =
+            super::super::vector_store::VectorStoreReader::open(&location, r, 1 << 20).unwrap();
         let leaf = 1u128 << 80;
         let posting = reader.posting_list(leaf).unwrap();
         let keys: Vec<(u128, u32)> = (0..posting.ids.len() as u32).map(|o| (leaf, o)).collect();

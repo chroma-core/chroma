@@ -1339,7 +1339,10 @@ impl SavedReader {
             return Ok((vec![(root.reference(), 0.0)], NavigationWork::default()));
         }
         let (mut leaves, work) = routing::navigate_batch(
-            &LocalNavigation { reader: self, parallel },
+            &LocalNavigation {
+                reader: self,
+                parallel,
+            },
             &root.routing(self.manifest.format.dimensions),
             &[query.to_vec()],
             policy,
@@ -1378,7 +1381,10 @@ impl SavedReader {
             0,
             None,
         )?;
-        let frontiers = backend.frontiers.into_inner().map_err(|_| "trace lock poisoned")?;
+        let frontiers = backend
+            .frontiers
+            .into_inner()
+            .map_err(|_| "trace lock poisoned")?;
         Ok((leaves.remove(0), frontiers))
     }
     pub fn node_parent(&self, id: u128) -> Option<u128> {
@@ -1396,7 +1402,9 @@ impl SavedReader {
         let mut out = Vec::with_capacity(self.posting_objects.len());
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
-            let Some(node) = self.nodes.get(&id) else { continue };
+            let Some(node) = self.nodes.get(&id) else {
+                continue;
+            };
             if node.leaf {
                 out.push(id);
             } else {
@@ -1407,7 +1415,9 @@ impl SavedReader {
     }
     /// Every saved node as (id, parent, leaf, owner), in ID order.
     pub fn tree_shape(&self) -> impl Iterator<Item = (u128, Option<u128>, bool, u64)> + '_ {
-        self.nodes.values().map(|n| (n.id, n.parent, n.leaf, n.owner))
+        self.nodes
+            .values()
+            .map(|n| (n.id, n.parent, n.leaf, n.owner))
     }
     /// The root as a navigation entry point. A v2 root has a zero placeholder
     /// centroid, since navigation reads only its length.
@@ -1463,7 +1473,8 @@ impl ExpansionBackend for LocalNavigation<'_> {
         _remote: &mut Vec<NodeRef>,
     ) -> Result<()> {
         if self.parallel {
-            self.reader.score_children_parallel(nodes, query, PARALLEL_NAVIGATION_NODES, children)
+            self.reader
+                .score_children_parallel(nodes, query, PARALLEL_NAVIGATION_NODES, children)
         } else {
             self.reader.score_children(nodes, query, None, children)
         }
@@ -1729,7 +1740,9 @@ mod tests;
 fn reader_worker_count(value: Option<&str>) -> Result<usize> {
     match value {
         None => Ok(32),
-        Some(value) => value.parse::<usize>().ok()
+        Some(value) => value
+            .parse::<usize>()
+            .ok()
             .filter(|workers| (1..=32).contains(workers))
             .ok_or_else(|| "SPANN_READER_WORKERS must be an integer from 1 through 32".into()),
     }

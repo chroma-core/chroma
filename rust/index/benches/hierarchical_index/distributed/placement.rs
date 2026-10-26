@@ -91,19 +91,40 @@ where
             fraction(budget.vector_capacity, 7, 10).saturating_sub(budget.next_interval_reserve)
         };
         let total: u128 = loads.values().map(|n| *n as u128).sum();
-        if total > budgets.iter().map(|b| ceiling(b.owner) as u128).sum::<u128>() {
+        if total
+            > budgets
+                .iter()
+                .map(|b| ceiling(b.owner) as u128)
+                .sum::<u128>()
+        {
             return Err("insufficient aggregate receiving headroom under the 70% target".into());
         }
         let mut possible = Vec::new();
-        for (index, unit) in units.iter().enumerate().filter(|(_, u)| u.vectors > 0 && !moved.contains(&u.root.id)) {
+        for (index, unit) in units
+            .iter()
+            .enumerate()
+            .filter(|(_, u)| u.vectors > 0 && !moved.contains(&u.root.id))
+        {
             let source_load = loads[&unit.root.authority];
             for dest in budgets.iter().filter(|b| b.owner != unit.root.authority) {
                 let dest_load = loads[&dest.owner];
                 // Moving fewer than the load difference strictly improves evenness.
                 if unit.vectors < source_load.saturating_sub(dest_load)
-                    && dest_load.checked_add(unit.vectors).is_some_and(|n| n <= ceiling(dest.owner)) {
-                    let improvement = 2u128 * unit.vectors as u128 * (source_load - dest_load - unit.vectors) as u128;
-                    possible.push((improvement, std::cmp::Reverse(dest_load), std::cmp::Reverse(unit.root.id), std::cmp::Reverse(dest.owner), index, dest.owner));
+                    && dest_load
+                        .checked_add(unit.vectors)
+                        .is_some_and(|n| n <= ceiling(dest.owner))
+                {
+                    let improvement = 2u128
+                        * unit.vectors as u128
+                        * (source_load - dest_load - unit.vectors) as u128;
+                    possible.push((
+                        improvement,
+                        std::cmp::Reverse(dest_load),
+                        std::cmp::Reverse(unit.root.id),
+                        std::cmp::Reverse(dest.owner),
+                        index,
+                        dest.owner,
+                    ));
                 }
             }
         }
@@ -114,7 +135,9 @@ where
                 .placement
                 .checked_add(1)
                 .ok_or("placement counter exhausted")?;
-            loads.entry(old.authority).and_modify(|n| *n -= unit.vectors);
+            loads
+                .entry(old.authority)
+                .and_modify(|n| *n -= unit.vectors);
             loads.entry(destination).and_modify(|n| *n += unit.vectors);
             moved.insert(old.id);
             result.moves.push(PlannedMove {
@@ -132,17 +155,20 @@ where
             .iter()
             .enumerate()
             .filter(|(_, u)| {
-                budgets.iter().any(|b| b.owner != u.root.authority
-                    && loads[&u.root.authority] > loads[&b.owner].saturating_add(1)
-                    && loads[&b.owner] < ceiling(b.owner))
-                    && !refined.contains(&u.root.id)
+                budgets.iter().any(|b| {
+                    b.owner != u.root.authority
+                        && loads[&u.root.authority] > loads[&b.owner].saturating_add(1)
+                        && loads[&b.owner] < ceiling(b.owner)
+                }) && !refined.contains(&u.root.id)
                     && !moved.contains(&u.root.id)
             })
             .max_by_key(|(_, u)| (u.vectors, std::cmp::Reverse(u.root.id)))
             .map(|(i, _)| i);
         let Some(index) = candidate else {
             if budgets.iter().any(|b| loads[&b.owner] > ceiling(b.owner)) {
-                return Err("no existing ownership refinement can provide capacity headroom".into());
+                return Err(
+                    "no existing ownership refinement can provide capacity headroom".into(),
+                );
             }
             result.units = units;
             result.final_vectors = loads;

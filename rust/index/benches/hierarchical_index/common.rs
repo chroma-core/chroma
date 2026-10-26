@@ -190,12 +190,16 @@ impl ReadBeamPolicy {
     }
 
     /// Floor the beam separately at each level (1-indexed by position).
+    // Used by the sharded reader bench, not by every crate sharing this module.
+    #[allow(dead_code)]
     pub fn with_level_beam_mins(mut self, mins: Vec<usize>) -> Self {
         self.level_beam_mins = mins;
         self
     }
 
     /// Cap the beam separately at each level (1-indexed by position).
+    // Used by the sharded reader bench, not by every crate sharing this module.
+    #[allow(dead_code)]
     pub fn with_level_beam_maxes(mut self, maxes: Vec<usize>) -> Self {
         self.level_beam_maxes = maxes;
         self

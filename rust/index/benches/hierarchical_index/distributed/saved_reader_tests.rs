@@ -396,23 +396,41 @@ fn reader_worker_count_is_bounded() {
 
 #[test]
 fn reader_batches_overlap_join_and_preserve_order() {
-    use std::sync::{atomic::{AtomicUsize, Ordering}, Barrier};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Barrier,
+    };
     let active = AtomicUsize::new(0);
     let peak = AtomicUsize::new(0);
     let barrier = Barrier::new(8);
     for fail in [false, true] {
         let mut visited = Vec::new();
-        let result = visit_reader_batches(&(0..32).collect::<Vec<_>>(), 8, |id| {
-            let now = active.fetch_add(1, Ordering::SeqCst) + 1;
-            peak.fetch_max(now, Ordering::SeqCst);
-            barrier.wait();
-            active.fetch_sub(1, Ordering::SeqCst);
-            if fail && *id == 3 { Err("injected immutable read failure".into()) } else { Ok(*id) }
-        }, |id, value| { assert_eq!(*id, value); visited.push(value); Ok(()) });
+        let result = visit_reader_batches(
+            &(0..32).collect::<Vec<_>>(),
+            8,
+            |id| {
+                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                barrier.wait();
+                active.fetch_sub(1, Ordering::SeqCst);
+                if fail && *id == 3 {
+                    Err("injected immutable read failure".into())
+                } else {
+                    Ok(*id)
+                }
+            },
+            |id, value| {
+                assert_eq!(*id, value);
+                visited.push(value);
+                Ok(())
+            },
+        );
         assert_eq!(active.load(Ordering::SeqCst), 0);
         assert_eq!(peak.load(Ordering::SeqCst), 8);
         if fail {
-            assert!(result.unwrap_err().contains("injected immutable read failure"));
+            assert!(result
+                .unwrap_err()
+                .contains("injected immutable read failure"));
             assert_eq!(visited, vec![0, 1, 2]);
         } else {
             result.unwrap();
@@ -917,16 +935,31 @@ fn v2_owner_routing_carries_an_optional_vector_store() {
 fn parallel_child_scoring_matches_sequential_order_and_scores() {
     let dir = tempfile::tempdir().unwrap();
     let descriptor = setup(dir.path());
-    let reader = SavedReader::open(GenerationStore::open(dir.path()).unwrap(), &descriptor).unwrap();
+    let reader =
+        SavedReader::open(GenerationStore::open(dir.path()).unwrap(), &descriptor).unwrap();
     // Repeat the internal nodes so the list splits into several runs.
-    let internal: Vec<NodeRef> = reader.nodes.values().filter(|n| !n.leaf).map(|n| n.reference()).collect();
-    let nodes: Vec<NodeRef> = internal.iter().cycle().take(internal.len() * 40).copied().collect();
+    let internal: Vec<NodeRef> = reader
+        .nodes
+        .values()
+        .filter(|n| !n.leaf)
+        .map(|n| n.reference())
+        .collect();
+    let nodes: Vec<NodeRef> = internal
+        .iter()
+        .cycle()
+        .take(internal.len() * 40)
+        .copied()
+        .collect();
     let query = vec![0.3f32; reader.manifest.format.dimensions];
     let mut sequential = vec![];
-    reader.score_children(&nodes, &query, None, &mut sequential).unwrap();
+    reader
+        .score_children(&nodes, &query, None, &mut sequential)
+        .unwrap();
     for run in [1, 3, 16, nodes.len() + 1] {
         let mut parallel = vec![];
-        reader.score_children_parallel(&nodes, &query, run, &mut parallel).unwrap();
+        reader
+            .score_children_parallel(&nodes, &query, run, &mut parallel)
+            .unwrap();
         assert_eq!(parallel, sequential, "run of {run} nodes");
     }
 }

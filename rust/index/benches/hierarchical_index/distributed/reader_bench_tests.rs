@@ -70,7 +70,8 @@ fn exact_distance_accumulates_in_float64() {
 
 #[test]
 fn recording_vectors_capture_reads_per_thread() {
-    let source = |id: u64| -> std::result::Result<Arc<[f32]>, String> { Ok(vec![id as f32].into()) };
+    let source =
+        |id: u64| -> std::result::Result<Arc<[f32]>, String> { Ok(vec![id as f32].into()) };
     let recording = RecordingVectors(&source);
     take_touched_vectors();
     recording.get(3).unwrap();
@@ -98,11 +99,18 @@ fn query_loading_joins_by_id_and_checks_references() {
     )
     .unwrap();
     let loaded = load_queries(&queries, &truth, 2, None).unwrap();
-    assert_eq!(loaded.iter().map(|q| q.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    assert_eq!(
+        loaded.iter().map(|q| q.id.as_str()).collect::<Vec<_>>(),
+        ["a", "b"]
+    );
     assert_eq!(loaded[1].truth_ids, [5]);
     assert_eq!(load_queries(&queries, &truth, 2, Some(1)).unwrap().len(), 1);
     assert!(load_queries(&queries, &truth, 3, None).is_err());
-    std::fs::write(&truth, "{\"query_id\":\"a\",\"ids\":[1,2],\"distances\":[0.2,0.1]}\n").unwrap();
+    std::fs::write(
+        &truth,
+        "{\"query_id\":\"a\",\"ids\":[1,2],\"distances\":[0.2,0.1]}\n",
+    )
+    .unwrap();
     assert!(load_queries(&queries, &truth, 2, None).is_err());
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -137,8 +145,14 @@ fn walk_diagnostics_track_reach_per_level_and_the_optimal_leaf_budget() {
     // The beam kept internal node 10 only, then leaf 11.
     let d = walk_diagnostics(&shape, &[vec![1], vec![10]], &[11], &truth);
     assert_eq!(d.levels.len(), 2);
-    assert_eq!((d.levels[0].scored, d.levels[0].kept, d.levels[0].reach), (2, 1, 0.5));
-    assert_eq!((d.levels[1].scored, d.levels[1].kept, d.levels[1].reach), (2, 1, 0.25));
+    assert_eq!(
+        (d.levels[0].scored, d.levels[0].kept, d.levels[0].reach),
+        (2, 1, 0.5)
+    );
+    assert_eq!(
+        (d.levels[1].scored, d.levels[1].kept, d.levels[1].reach),
+        (2, 1, 0.25)
+    );
     assert_eq!(d.leaf_reach, 0.25);
     // One leaf of budget at best holds leaf 21's two neighbors.
     assert_eq!(d.optimal_recall, 0.5);
@@ -152,5 +166,8 @@ fn exact_leaf_ranks_order_leaves_by_centroid_distance() {
     let (a, b, c) = ([0.0f32, 0.0], [1.0f32, 0.0], [5.0f32, 0.0]);
     let centroids = vec![(3u128, &c[..]), (1u128, &a[..]), (2u128, &b[..])];
     let truth = vec![(10u64, 3u128), (11, 2), (12, 9)];
-    assert_eq!(exact_leaf_ranks(&centroids, &[0.9, 0.0], &truth), vec![2, 0, usize::MAX]);
+    assert_eq!(
+        exact_leaf_ranks(&centroids, &[0.9, 0.0], &truth),
+        vec![2, 0, usize::MAX]
+    );
 }

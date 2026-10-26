@@ -12,11 +12,14 @@
 use super::super::common::ReadBeamPolicy;
 use super::{
     mapped_vectors::MappedVectorSource,
-    vector_store::VectorStoreReader,
     reader_bench::distinct_pages,
     routing::NavigationWork,
     saved_reader::{SavedPostingList, SavedReader},
-    transport::{last_call_timing, CallTiming, RequestClass, RpcClient, ServerRequestTiming, TransportSnapshot},
+    transport::{
+        last_call_timing, CallTiming, RequestClass, RpcClient, ServerRequestTiming,
+        TransportSnapshot,
+    },
+    vector_store::VectorStoreReader,
 };
 use chroma_index::quantization::{Code, QuantizedQuery};
 use rayon::prelude::*;
@@ -88,7 +91,11 @@ pub(crate) struct Shortlist {
 }
 impl Shortlist {
     pub(crate) fn new(keep: usize) -> Self {
-        Self { keep: keep.max(1), items: vec![], cutoff: None }
+        Self {
+            keep: keep.max(1),
+            items: vec![],
+            cutoff: None,
+        }
     }
     /// The cutoff's distance, or infinity before the first trim.
     #[inline(always)]
@@ -119,7 +126,9 @@ impl Shortlist {
     }
     fn trim(&mut self) {
         if self.items.len() > self.keep {
-            let (_, nth, _) = self.items.select_nth_unstable_by(self.keep - 1, candidate_order);
+            let (_, nth, _) = self
+                .items
+                .select_nth_unstable_by(self.keep - 1, candidate_order);
             let cut = (nth.distance, nth.id);
             self.items.truncate(self.keep);
             self.cutoff = Some(cut);
@@ -171,14 +180,26 @@ struct Worker {
 }
 impl Worker {
     fn new(keep: usize) -> Self {
-        Self { shortlist: Shortlist::new(keep), work: ChunkWork::default(), residual: vec![], distances: vec![] }
+        Self {
+            shortlist: Shortlist::new(keep),
+            work: ChunkWork::default(),
+            residual: vec![],
+            distances: vec![],
+        }
     }
     fn scan(&mut self, q: &ScanQuery, leaf: &LeafInput) -> Result<()> {
         let dim = q.query.len();
         self.residual.clear();
-        self.residual.extend(q.query.iter().zip(leaf.centroid).map(|(q, c)| q - c));
+        self.residual
+            .extend(q.query.iter().zip(leaf.centroid).map(|(q, c)| q - c));
         let dot = leaf.centroid.iter().zip(q.query).map(|(c, q)| c * q).sum();
-        let qq = QuantizedQuery::new(&self.residual, Code::<1>::packed_len(dim), leaf.centroid_norm, dot, q.q_norm);
+        let qq = QuantizedQuery::new(
+            &self.residual,
+            Code::<1>::packed_len(dim),
+            leaf.centroid_norm,
+            dot,
+            q.q_norm,
+        );
         let n = leaf.ids.len();
         // The scorer overwrites every slot, so stale values never leak.
         if self.distances.len() < n {
@@ -205,7 +226,12 @@ impl Worker {
                 for (o, (&id, &distance)) in leaf.ids[first..].iter().zip(block).enumerate() {
                     if self.shortlist.admits(distance, id) {
                         let ordinal = (first + o) as u32;
-                        self.shortlist.push(Candidate { id, distance, slot: leaf.slot, ordinal });
+                        self.shortlist.push(Candidate {
+                            id,
+                            distance,
+                            slot: leaf.slot,
+                            ordinal,
+                        });
                     }
                 }
             }
@@ -300,7 +326,10 @@ mod wire {
             out.extend_from_slice(&self.1.to_le_bytes());
         }
         fn get(raw: &[u8]) -> Self {
-            (u64::from_le_bytes(raw[..8].try_into().unwrap()), u32::from_le_bytes(raw[8..].try_into().unwrap()))
+            (
+                u64::from_le_bytes(raw[..8].try_into().unwrap()),
+                u32::from_le_bytes(raw[8..].try_into().unwrap()),
+            )
         }
     }
     pub fn serialize<T: Row, S: Serializer>(rows: &[T], serializer: S) -> Result<S::Ok, S::Error> {
@@ -312,7 +341,9 @@ mod wire {
     }
     /// The transport bounds the frame before decoding, which bounds this
     /// allocation too.
-    pub fn deserialize<'de, T: Row, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<T>, D::Error> {
+    pub fn deserialize<'de, T: Row, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<T>, D::Error> {
         struct Rows<T>(std::marker::PhantomData<T>);
         impl<T: Row> serde::de::Visitor<'_> for Rows<T> {
             type Value = Vec<T>;
@@ -322,7 +353,9 @@ mod wire {
             fn visit_str<E: Error>(self, encoded: &str) -> Result<Self::Value, E> {
                 let bytes = BASE64_STANDARD.decode(encoded).map_err(E::custom)?;
                 if bytes.len() % T::WIDTH != 0 {
-                    return Err(E::custom("row payload length is not a multiple of the row width"));
+                    return Err(E::custom(
+                        "row payload length is not a multiple of the row width",
+                    ));
                 }
                 Ok(bytes.chunks_exact(T::WIDTH).map(T::get).collect())
             }
@@ -457,12 +490,19 @@ impl Placement {
             .filter_map(|leaf| reader.node_owner(leaf).map(|o| (leaf, o)))
             .collect();
         let parts = part.values().copied().collect::<BTreeSet<_>>().len() as u64;
-        Self { part, parts, kind: "saved" }
+        Self {
+            part,
+            parts,
+            kind: "saved",
+        }
     }
     pub fn subtrees(reader: &SavedReader, parts: u64) -> Result<Self> {
         let order = reader.leaves_depth_first();
         if parts == 0 || parts as usize > order.len() {
-            return Err(format!("cannot split {} leaves into {parts} parts", order.len()));
+            return Err(format!(
+                "cannot split {} leaves into {parts} parts",
+                order.len()
+            ));
         }
         let bytes: Vec<u64> = order
             .iter()
@@ -474,13 +514,19 @@ impl Placement {
         for (leaf, b) in order.iter().zip(&bytes) {
             // Move to the next part once this leaf's midpoint passes the
             // current part's equal share of all posting bytes.
-            while current + 1 < parts && (seen + b / 2) as u128 * parts as u128 > total as u128 * (current + 1) as u128 {
+            while current + 1 < parts
+                && (seen + b / 2) as u128 * parts as u128 > total as u128 * (current + 1) as u128
+            {
                 current += 1;
             }
             part.insert(*leaf, current + 1);
             seen += b;
         }
-        Ok(Self { part, parts, kind: "subtree" })
+        Ok(Self {
+            part,
+            parts,
+            kind: "subtree",
+        })
     }
     pub fn part(&self, leaf: u128) -> Option<u64> {
         self.part.get(&leaf).copied()
@@ -489,7 +535,11 @@ impl Placement {
         self.parts
     }
     pub fn leaves_of(&self, parts: &BTreeSet<u64>) -> BTreeSet<u128> {
-        self.part.iter().filter(|(_, p)| parts.contains(p)).map(|(l, _)| *l).collect()
+        self.part
+            .iter()
+            .filter(|(_, p)| parts.contains(p))
+            .map(|(l, _)| *l)
+            .collect()
     }
     pub fn leaves_by_part(&self) -> BTreeMap<u64, usize> {
         let mut counts = BTreeMap::new();
@@ -522,7 +572,15 @@ impl ScanEngine {
         budget_bytes: u64,
     ) -> Result<Self> {
         let placement = Arc::new(Placement::saved(&reader));
-        Self::with_placement(reader, placement, owners, vectors, fetch_threads, scan_threads, budget_bytes)
+        Self::with_placement(
+            reader,
+            placement,
+            owners,
+            vectors,
+            fetch_threads,
+            scan_threads,
+            budget_bytes,
+        )
     }
     /// An engine for the leaves that `placement` assigns to `parts`.
     pub fn with_placement(
@@ -584,7 +642,10 @@ impl ScanEngine {
         let list = self.reader.posting_list(leaf)?;
         // v2 postings carry their leaf centroid; v1 falls back to routing.
         let centroid_norm = norm(list.scoring_centroid(&self.reader)?);
-        let posting = Arc::new(LeafPosting { list, centroid_norm });
+        let posting = Arc::new(LeafPosting {
+            list,
+            centroid_norm,
+        });
         let bytes = self.reader.posting_object_bytes(leaf).unwrap_or(0);
         if self.cached_bytes.fetch_add(bytes, Ordering::Relaxed) + bytes <= self.budget_bytes {
             let _ = slot.value.set(posting.clone());
@@ -612,7 +673,10 @@ impl ScanEngine {
         let mut postings: Vec<Option<Arc<LeafPosting>>> = Vec::with_capacity(leaves.len());
         let mut misses = vec![];
         for (i, leaf) in leaves.iter().enumerate() {
-            let slot = self.slots.get(leaf).ok_or("leaf is not served by this process")?;
+            let slot = self
+                .slots
+                .get(leaf)
+                .ok_or("leaf is not served by this process")?;
             work.posting_object_bytes += self.reader.posting_object_bytes(*leaf).unwrap_or(0);
             match slot.value.get() {
                 Some(p) => {
@@ -627,14 +691,18 @@ impl ScanEngine {
         }
         if !misses.is_empty() {
             let t = Instant::now();
-            let fetched: Vec<Result<(Arc<LeafPosting>, bool)>> = self
-                .fetch_pool
-                .install(|| misses.par_iter().map(|(_, leaf, slot)| self.fill(*leaf, slot)).collect());
+            let fetched: Vec<Result<(Arc<LeafPosting>, bool)>> = self.fetch_pool.install(|| {
+                misses
+                    .par_iter()
+                    .map(|(_, leaf, slot)| self.fill(*leaf, slot))
+                    .collect()
+            });
             for ((i, leaf, _), result) in misses.iter().zip(fetched) {
                 let (posting, fetched) = result?;
                 if fetched {
                     work.posting_fetches += 1;
-                    work.posting_bytes_fetched += self.reader.posting_object_bytes(*leaf).unwrap_or(0);
+                    work.posting_bytes_fetched +=
+                        self.reader.posting_object_bytes(*leaf).unwrap_or(0);
                 } else {
                     work.cache_hits += 1;
                 }
@@ -659,7 +727,12 @@ impl ScanEngine {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let scan_query = ScanQuery { query, q_norm: norm(query), metric, keep };
+        let scan_query = ScanQuery {
+            query,
+            q_norm: norm(query),
+            metric,
+            keep,
+        };
         let (mut shortlist, cw) = score_leaves(&self.scan_pool, &scan_query, &inputs)?;
         work.leaves += cw.leaves;
         work.vectors += cw.vectors;
@@ -719,7 +792,8 @@ impl ScanEngine {
             work.reranked = shortlist.len() as u64;
             timing.rerank = t.elapsed().as_nanos() as u64;
         }
-        let mut candidates: Vec<(u64, f32)> = shortlist.iter().map(|c| (c.id, c.distance)).collect();
+        let mut candidates: Vec<(u64, f32)> =
+            shortlist.iter().map(|c| (c.id, c.distance)).collect();
         candidates.sort_unstable_by(by_score_then_id);
         candidates.truncate(k);
         work.cache_bytes_after = self.cached_bytes();
@@ -731,7 +805,9 @@ impl ScanEngine {
         let begin = Instant::now();
         let server = super::transport::current_server_request().unwrap_or_default();
         let query: Vec<f32> = request.query.iter().map(|b| f32::from_bits(*b)).collect();
-        if query.len() != self.reader.manifest.format.dimensions || query.iter().any(|x| !x.is_finite()) {
+        if query.len() != self.reader.manifest.format.dimensions
+            || query.iter().any(|x| !x.is_finite())
+        {
             return Err("scan query has the wrong dimension or nonfinite values".into());
         }
         let cpu = super::reader_bench::process_cpu_seconds();
@@ -741,7 +817,10 @@ impl ScanEngine {
         let (results, work, timing) = scanned?;
         let cpu_seconds = super::reader_bench::process_cpu_seconds() - cpu;
         Ok(ScanReply {
-            results: results.into_iter().map(|(id, d)| (id, d.to_bits())).collect(),
+            results: results
+                .into_iter()
+                .map(|(id, d)| (id, d.to_bits()))
+                .collect(),
             work,
             timing,
             cpu_seconds,
@@ -785,7 +864,11 @@ impl RemoteOwner {
                 })
                 .expect("start remote scan worker");
         }
-        Arc::new(Self { owner, client, jobs })
+        Arc::new(Self {
+            owner,
+            client,
+            jobs,
+        })
     }
     fn submit(&self, job: RemoteJob) -> Result<()> {
         self.jobs
@@ -794,7 +877,12 @@ impl RemoteOwner {
     }
     /// One scan request with retries, run on a worker thread. `queued` is when
     /// the query handed the request over.
-    fn scan(&self, request: ScanRequest, deadline: Duration, queued: Instant) -> Result<(OwnerPart, Vec<(u64, f32)>)> {
+    fn scan(
+        &self,
+        request: ScanRequest,
+        deadline: Duration,
+        queued: Instant,
+    ) -> Result<(OwnerPart, Vec<(u64, f32)>)> {
         let t = Instant::now();
         let client_spawn_ns = (t - queued).as_nanos() as u64;
         let before = self.client.counters();
@@ -802,10 +890,16 @@ impl RemoteOwner {
         // storage error on the owner) is retried.
         let mut attempt = 1;
         let reply: ScanReply = loop {
-            match self.client.call(&request, RequestClass::Data, Instant::now() + deadline) {
+            match self
+                .client
+                .call(&request, RequestClass::Data, Instant::now() + deadline)
+            {
                 Ok(reply) => break reply,
                 Err(e) if attempt < SCAN_ATTEMPTS => {
-                    eprintln!("owner {} scan attempt {attempt} failed, retrying: {e}", self.owner);
+                    eprintln!(
+                        "owner {} scan attempt {attempt} failed, retrying: {e}",
+                        self.owner
+                    );
                     std::thread::sleep(Duration::from_millis(50 * attempt as u64));
                     attempt += 1;
                 }
@@ -815,7 +909,11 @@ impl RemoteOwner {
         let call = last_call_timing();
         let (sent, received) = delta(&self.client.counters(), &before);
         let decoding = Instant::now();
-        let results = reply.results.iter().map(|(id, d)| (*id, f32::from_bits(*d))).collect();
+        let results = reply
+            .results
+            .iter()
+            .map(|(id, d)| (*id, f32::from_bits(*d)))
+            .collect();
         let client_results_ns = decoding.elapsed().as_nanos() as u64;
         Ok((
             OwnerPart {
@@ -897,7 +995,11 @@ impl Drop for InFlight {
 /// Cores this process may use.
 fn cores() -> usize {
     static CORES: OnceLock<usize> = OnceLock::new();
-    *CORES.get_or_init(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1))
+    *CORES.get_or_init(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    })
 }
 
 /// The query machine: local navigation, per-owner scans and the merge.
@@ -944,7 +1046,9 @@ impl OwnerQuery {
         let _in_flight = InFlight;
         let navigation_parallel = queries_in_flight < cores();
         let t = Instant::now();
-        let (leaves, navigation) = self.reader.navigate_local_with(query, policy, navigation_parallel)?;
+        let (leaves, navigation) =
+            self.reader
+                .navigate_local_with(query, policy, navigation_parallel)?;
         let mut record = QueryRecord {
             navigation,
             navigation_ns: t.elapsed().as_nanos() as u64,
@@ -955,11 +1059,14 @@ impl OwnerQuery {
         let mut groups: BTreeMap<u64, Vec<u128>> = BTreeMap::new();
         let placement = self.local.placement();
         for (leaf, _) in &leaves {
-            let owner = placement.part(leaf.id).ok_or("navigation reached an unknown leaf")?;
+            let owner = placement
+                .part(leaf.id)
+                .ok_or("navigation reached an unknown leaf")?;
             groups.entry(owner).or_default().push(leaf.id);
         }
         for owner in groups.keys() {
-            if !self.local_owners.contains(owner) && !self.remotes.iter().any(|r| r.owner == *owner) {
+            if !self.local_owners.contains(owner) && !self.remotes.iter().any(|r| r.owner == *owner)
+            {
                 return Err(format!("no process serves owner {owner}"));
             }
         }
@@ -969,16 +1076,30 @@ impl OwnerQuery {
         let (replies, reply_receiver) = std::sync::mpsc::channel();
         let mut remote_count = 0;
         for remote in &self.remotes {
-            let Some(leaves) = groups.get(&remote.owner) else { continue };
+            let Some(leaves) = groups.get(&remote.owner) else {
+                continue;
+            };
             let t = Instant::now();
-            let request = ScanRequest { query: query.iter().map(|x| x.to_bits()).collect(), leaves: leaves.clone(), k, rerank };
+            let request = ScanRequest {
+                query: query.iter().map(|x| x.to_bits()).collect(),
+                leaves: leaves.clone(),
+                k,
+                rerank,
+            };
             let client_build_ns = t.elapsed().as_nanos() as u64;
-            let (worker, replies, deadline, queued) = (remote.clone(), replies.clone(), self.deadline, Instant::now());
+            let (worker, replies, deadline, queued) = (
+                remote.clone(),
+                replies.clone(),
+                self.deadline,
+                Instant::now(),
+            );
             remote.submit(Box::new(move || {
-                let part = worker.scan(request, deadline, queued).map(|(mut part, results)| {
-                    part.client_build_ns = client_build_ns;
-                    (part, results)
-                });
+                let part = worker
+                    .scan(request, deadline, queued)
+                    .map(|(mut part, results)| {
+                        part.client_build_ns = client_build_ns;
+                        (part, results)
+                    });
                 let _ = replies.send(part);
             }))?;
             remote_count += 1;
@@ -1005,7 +1126,11 @@ impl OwnerQuery {
             })
             .collect();
         let remote_parts: Vec<Result<(OwnerPart, Vec<(u64, f32)>)>> = (0..remote_count)
-            .map(|_| reply_receiver.recv().unwrap_or_else(|_| Err("remote scan worker panicked".to_string())))
+            .map(|_| {
+                reply_receiver
+                    .recv()
+                    .unwrap_or_else(|_| Err("remote scan worker panicked".to_string()))
+            })
             .collect();
         let t = Instant::now();
         let mut merged = vec![];

@@ -497,7 +497,12 @@ pub(super) fn write_owner_vectors_parallel_chunked(
         ));
     }
     let load = |&(leaf, ids): &(u128, &[u64])| -> Result<(u128, Vec<Arc<[f32]>>), String> {
-        Ok((leaf, ids.iter().map(|id| vectors(*id)).collect::<Result<_, _>>()?))
+        Ok((
+            leaf,
+            ids.iter()
+                .map(|id| vectors(*id))
+                .collect::<Result<_, _>>()?,
+        ))
     };
     let ranges = segment_ranges(leaves, writers.max(1));
     if ranges.len() <= 1 {
@@ -529,7 +534,9 @@ pub(super) fn write_owner_vectors_parallel_chunked(
                         );
                         match written {
                             Err(e) if attempt < SEGMENT_ATTEMPTS => {
-                                eprintln!("vector store segment attempt {attempt} failed, retrying: {e}");
+                                eprintln!(
+                                    "vector store segment attempt {attempt} failed, retrying: {e}"
+                                );
                                 std::thread::sleep(std::time::Duration::from_secs(1 << attempt));
                                 attempt += 1;
                             }
@@ -541,7 +548,10 @@ pub(super) fn write_owner_vectors_parallel_chunked(
             .collect();
         handles
             .into_iter()
-            .map(|h| h.join().unwrap_or_else(|_| Err("vector store writer panicked".into())))
+            .map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| Err("vector store writer panicked".into()))
+            })
             .collect()
     });
     let mut segments = Vec::with_capacity(written.len());
@@ -573,7 +583,14 @@ fn write_owner_vectors_chunked_results(
     chunk_bytes: usize,
     leaves: impl Iterator<Item = Result<(u128, Vec<Arc<[f32]>>), String>>,
 ) -> Result<VectorStoreRef, String> {
-    let segment = write_segment(location, owner, dimensions, max_block_size_bytes, chunk_bytes, leaves)?;
+    let segment = write_segment(
+        location,
+        owner,
+        dimensions,
+        max_block_size_bytes,
+        chunk_bytes,
+        leaves,
+    )?;
     Ok(VectorStoreRef {
         kind: LEAF_ORDINAL_LAYOUT.to_string(),
         blockfile_id: segment.blockfile_id.to_string(),
@@ -758,14 +775,19 @@ impl VectorStoreReader {
     ) -> Result<Self, String> {
         let segments: Vec<(Uuid, (u128, u32), u64)> = match reference.kind.as_str() {
             LEAF_ORDINAL_LAYOUT if reference.segments.is_empty() => {
-                vec![(parse_blockfile_id(&reference.blockfile_id)?, (0, 0), reference.rows)]
+                vec![(
+                    parse_blockfile_id(&reference.blockfile_id)?,
+                    (0, 0),
+                    reference.rows,
+                )]
             }
             SEGMENTED_LEAF_ORDINAL_LAYOUT if !reference.segments.is_empty() => reference
                 .segments
                 .iter()
                 .map(|s| {
-                    let first = u128::from_str_radix(&s.first_leaf, 16)
-                        .map_err(|e| format!("vector segment first leaf {:?}: {e}", s.first_leaf))?;
+                    let first = u128::from_str_radix(&s.first_leaf, 16).map_err(|e| {
+                        format!("vector segment first leaf {:?}: {e}", s.first_leaf)
+                    })?;
                     Ok((parse_blockfile_id(&s.blockfile_id)?, (first, 0), s.rows))
                 })
                 .collect::<Result<_, String>>()?,
@@ -810,7 +832,9 @@ impl VectorStoreReader {
                 Ok::<_, String>((count, BlockIndex::try_from(blockfile.block_index())?))
             })?;
             if count as u64 != *rows {
-                return Err(format!("vector blockfile {id} holds {count} rows, reference says {rows}"));
+                return Err(format!(
+                    "vector blockfile {id} holds {count} rows, reference says {rows}"
+                ));
             }
             if k > 0 && index.starts[0] == (0, 0) {
                 index.starts[0] = *first;
@@ -1014,10 +1038,17 @@ impl VectorStoreReader {
                 let mut attempt = 1;
                 loop {
                     match reader.fetch_block(id).await {
-                        Ok(block) => break block.ok_or_else(|| format!("vector block {id} not found")),
+                        Ok(block) => {
+                            break block.ok_or_else(|| format!("vector block {id} not found"))
+                        }
                         Err(e) if attempt < BLOCK_LOAD_ATTEMPTS => {
-                            eprintln!("vector block {id} load attempt {attempt} failed, retrying: {e}");
-                            tokio::time::sleep(std::time::Duration::from_millis(100 * attempt as u64)).await;
+                            eprintln!(
+                                "vector block {id} load attempt {attempt} failed, retrying: {e}"
+                            );
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                100 * attempt as u64,
+                            ))
+                            .await;
                             attempt += 1;
                         }
                         Err(e) => break Err(format!("load vector block {id}: {e}")),
@@ -1068,7 +1099,9 @@ impl BlockIndex {
     fn append(&mut self, other: BlockIndex) -> Result<(), String> {
         if let (Some(last), Some(first)) = (self.starts.last(), other.starts.first()) {
             if first <= last {
-                return Err(format!("vector segment starts at {first:?}, before {last:?}"));
+                return Err(format!(
+                    "vector segment starts at {first:?}, before {last:?}"
+                ));
             }
         }
         self.starts.extend(other.starts);

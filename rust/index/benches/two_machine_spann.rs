@@ -1,7 +1,7 @@
 //! The same owner service runs on each physical machine. This executable keeps
 //! remote construction separate from the retained unsharded reference harness.
 #![recursion_limit = "256"]
-#![allow(unexpected_cfgs, dead_code)]
+#![allow(unexpected_cfgs, dead_code, unused_imports, clippy::all)]
 mod hierarchical_index;
 use chroma_distance::DistanceFunction;
 use clap::Parser;
@@ -112,7 +112,11 @@ struct Args {
     /// Save each owner's full vectors as a blockfile with the generation.
     /// Remote owners write directly to the durable store, so this needs
     /// --storage-config; a repeated save would reuse blocks the store needs.
-    #[arg(long, requires = "storage_config", conflicts_with = "save_unchanged_generation")]
+    #[arg(
+        long,
+        requires = "storage_config",
+        conflicts_with = "save_unchanged_generation"
+    )]
     save_vector_store: bool,
     #[arg(long, default_value_t = 16)]
     validation_queries: usize,
@@ -272,9 +276,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if (args.balance_only || args.checkpoint_after_add_at.is_some()) && !args.construction_only {
-        return Err("balance replay and post-insertion checkpoint require --construction-only".into());
+        return Err(
+            "balance replay and post-insertion checkpoint require --construction-only".into(),
+        );
     }
-    if args.checkpoint_after_add_at.is_some_and(|position| position == 0 || position > args.rows) {
+    if args
+        .checkpoint_after_add_at
+        .is_some_and(|position| position == 0 || position > args.rows)
+    {
         return Err("post-insertion checkpoint must be within workload rows".into());
     }
     if args.mode == "run" && args.owner != 1 {
@@ -350,16 +359,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config,
         vectors,
     ));
-    if let Some(directory) = &args.checkpoint_directory { fs::create_dir_all(directory)?; }
-    let checkpoint = args.restore_checkpoint.as_ref().map(|dir| WriterCheckpoint::read(&dir.join(format!("owner-{}.json", args.owner)))).transpose()?;
+    if let Some(directory) = &args.checkpoint_directory {
+        fs::create_dir_all(directory)?;
+    }
+    let checkpoint = args
+        .restore_checkpoint
+        .as_ref()
+        .map(|dir| WriterCheckpoint::read(&dir.join(format!("owner-{}.json", args.owner))))
+        .transpose()?;
     let resume_input = checkpoint.as_ref().map_or(0, |c| c.next_input);
     let mut balance_pending = checkpoint.as_ref().is_some_and(|c| c.balance_pending);
-    if args.checkpoint_every == Some(0) { return Err("checkpoint interval must be nonzero".into()); }
-    if resume_input > args.rows { return Err("checkpoint input position exceeds workload".into()); }
-    if args.balance_only && (resume_input == 0 || resume_input != args.rows) {
-        return Err("balance-only requires checkpoint next_input equal to nonzero workload rows".into());
+    if args.checkpoint_every == Some(0) {
+        return Err("checkpoint interval must be nonzero".into());
     }
-    if args.checkpoint_after_add_at.is_some_and(|position| position <= resume_input) {
+    if resume_input > args.rows {
+        return Err("checkpoint input position exceeds workload".into());
+    }
+    if args.balance_only && (resume_input == 0 || resume_input != args.rows) {
+        return Err(
+            "balance-only requires checkpoint next_input equal to nonzero workload rows".into(),
+        );
+    }
+    if args
+        .checkpoint_after_add_at
+        .is_some_and(|position| position <= resume_input)
+    {
         return Err("post-insertion checkpoint must follow restored input position".into());
     }
     let mut initial = owner.initial_root();
@@ -396,9 +420,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         BTreeMap::from([(peer, client.clone())]),
         initial.routing,
     );
-    if let Some(checkpoint) = checkpoint { cluster.restore_checkpoint(checkpoint, &descriptor.sha256)?; }
+    if let Some(checkpoint) = checkpoint {
+        cluster.restore_checkpoint(checkpoint, &descriptor.sha256)?;
+    }
     // Saves also write each owner's full vectors to the store as a blockfile.
-    cluster.save_vector_store.store(args.save_vector_store, std::sync::atomic::Ordering::Relaxed);
+    cluster
+        .save_vector_store
+        .store(args.save_vector_store, std::sync::atomic::Ordering::Relaxed);
     cluster.shutdown_deadline = Some(shutdown_deadline);
     let cluster = Arc::new(cluster);
     owner.bind_cluster(&cluster);
@@ -409,7 +437,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn(move || {
         if let Ok(mut file) = File::create(sample_path) {
             while now() < sample_deadline {
-                if let Ok(EngineResponse::Counts(value)) = sample_owner.handle(EngineRequest::Counts) {
+                if let Ok(EngineResponse::Counts(value)) =
+                    sample_owner.handle(EngineRequest::Counts)
+                {
                     let _ = event(&mut file, json!({"event":"owner_sample", "counts":value}));
                 }
                 std::thread::sleep(Duration::from_secs(1));
@@ -425,7 +455,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         transport,
         Arc::new(move |request: EngineRequest| handler.handle(request)),
         Arc::new(move |request: &EngineRequest| {
-            let cap = if matches!(request, EngineRequest::SaveOwner(_) | EngineRequest::WriterCheckpoint { .. } | EngineRequest::ValidateWriter) {
+            let cap = if matches!(
+                request,
+                EngineRequest::SaveOwner(_)
+                    | EngineRequest::WriterCheckpoint { .. }
+                    | EngineRequest::ValidateWriter
+            ) {
                 hierarchical_index::distributed::save_runtime::save_operation_timeout()
             } else {
                 ordinary_timeout
@@ -478,16 +513,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let replay_seconds = began.elapsed().as_secs_f64();
         // Serialize wide node IDs directly; serde_json::Value is limited to u64.
-        fs::write(args.output.join("replay-results.json"), serde_json::to_vec(&results)?)?;
-        fs::write(args.output.join("replay.json"), serde_json::to_vec(&json!({"seconds":replay_seconds,"queries":args.replay_queries,"owners":counts(&cluster)?}))?)?;
+        fs::write(
+            args.output.join("replay-results.json"),
+            serde_json::to_vec(&results)?,
+        )?;
+        fs::write(
+            args.output.join("replay.json"),
+            serde_json::to_vec(
+                &json!({"seconds":replay_seconds,"queries":args.replay_queries,"owners":counts(&cluster)?}),
+            )?,
+        )?;
         return Ok(());
     }
     if args.place_after_restore {
         if resume_input != args.rows || balance_pending {
-            return Err("--place-after-restore needs a balanced checkpoint at exactly the workload rows".into());
+            return Err(
+                "--place-after-restore needs a balanced checkpoint at exactly the workload rows"
+                    .into(),
+            );
         }
         let t = Instant::now();
-        let report = cluster.redistribute(BTreeMap::from([(1, args.owner_budget), (2, args.owner_budget)]))?;
+        let report = cluster.redistribute(BTreeMap::from([
+            (1, args.owner_budget),
+            (2, args.owner_budget),
+        ]))?;
         event(
             &mut events,
             json!({"event":"restored_placement_complete","seconds":t.elapsed().as_secs_f64(),"placement_report":placement_plan_json(&report),"vector_budget_per_owner":args.owner_budget,"owners":counts(&cluster)?}),
@@ -498,7 +547,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while start < args.rows || balance_pending || (args.balance_only && cycles.is_empty()) {
         check_deadline(&args)?;
         let skip_add = args.balance_only || balance_pending;
-        let end = if skip_add { start } else if start < args.transition {
+        let end = if skip_add {
+            start
+        } else if start < args.transition {
             start
                 .saturating_add(args.initial_batch)
                 .min(args.transition)
@@ -507,17 +558,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             start.saturating_add(args.later_batch).min(args.rows)
         };
         // A requested insertion checkpoint is an explicit batch boundary.
-        let end = args.checkpoint_after_add_at.map_or(end, |position| end.min(position));
+        let end = args
+            .checkpoint_after_add_at
+            .map_or(end, |position| end.min(position));
         let end = if !skip_add {
-            let end = args.checkpoint_every.map_or(end, |interval| end.min((start / interval + 1).saturating_mul(interval)));
-            args.checkpoint_rows.iter().copied().filter(|r| *r > start).min().map_or(end, |r| end.min(r))
-        } else { end };
+            let end = args.checkpoint_every.map_or(end, |interval| {
+                end.min((start / interval + 1).saturating_mul(interval))
+            });
+            args.checkpoint_rows
+                .iter()
+                .copied()
+                .filter(|r| *r > start)
+                .min()
+                .map_or(end, |r| end.min(r))
+        } else {
+            end
+        };
         let ids = (start..end).collect::<Vec<_>>();
         let before_add = counts(&cluster)?;
         let rpc_before_add = rpc_accounting(&client, &server);
         let t = Instant::now();
-        if !skip_add { cluster.add_batch(&ids, args.workers)?; }
-        let add = if skip_add { 0.0 } else { t.elapsed().as_secs_f64() };
+        if !skip_add {
+            cluster.add_batch(&ids, args.workers)?;
+        }
+        let add = if skip_add {
+            0.0
+        } else {
+            t.elapsed().as_secs_f64()
+        };
         let rpc_after_add = rpc_accounting(&client, &server);
         let after_add = counts(&cluster)?;
         // Persist completed phase evidence before balancing can fail. Reuse the
@@ -527,19 +595,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"event":if skip_add { "add_skipped_for_balance_replay" } else { "add_complete" },"rows_before":start,"rows_after":end,"seconds":add,"before":before_add,"after":after_add,"rpc_before":rpc_before_add,"rpc_after":rpc_after_add}),
         )?;
         if args.checkpoint_after_add_at == Some(end) {
-            let directory = args.checkpoint_directory.as_ref().ok_or("checkpoint directory required")?;
+            let directory = args
+                .checkpoint_directory
+                .as_ref()
+                .ok_or("checkpoint directory required")?;
             cluster.checkpoint_phase(directory, end, &descriptor.sha256, true, false)?;
             let receipt = json!({"status":"writer_checkpoint_complete", "mode":"post_insertion_checkpoint", "next_input":end, "resume_input":resume_input, "add_seconds":add, "directory":directory, "owners":counts(&cluster)?});
-            event(&mut events, json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_add_before_balance", "receipt":receipt}))?;
-            fs::write(args.output.join("result.json"), serde_json::to_vec_pretty(&receipt)?)?;
+            event(
+                &mut events,
+                json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_add_before_balance", "receipt":receipt}),
+            )?;
+            fs::write(
+                args.output.join("result.json"),
+                serde_json::to_vec_pretty(&receipt)?,
+            )?;
             return Ok(());
         }
-        let periodic_boundary = args.checkpoint_every.is_some_and(|interval| end % interval == 0 || end == args.rows)
+        let periodic_boundary = args
+            .checkpoint_every
+            .is_some_and(|interval| end % interval == 0 || end == args.rows)
             || args.checkpoint_rows.contains(&end);
         if periodic_boundary && !skip_add && !args.checkpoint_after_balance_only {
-            let directory = args.checkpoint_directory.as_ref().unwrap().join(format!("rows-{end}-after-add"));
+            let directory = args
+                .checkpoint_directory
+                .as_ref()
+                .unwrap()
+                .join(format!("rows-{end}-after-add"));
             cluster.checkpoint_phase(&directory, end, &descriptor.sha256, true, true)?;
-            event(&mut events, json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_add_before_balance", "next_input":end, "directory":directory}))?;
+            event(
+                &mut events,
+                json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_add_before_balance", "next_input":end, "directory":directory}),
+            )?;
         }
         let before_balance = counts(&cluster)?;
         let kernel_before = chroma_index::spann::utils::clustering_profile_snapshot();
@@ -596,7 +682,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let t = Instant::now();
         let placement_report = if end >= args.placement_start {
             cluster.redistribute(BTreeMap::from([(1, budget), (2, budget)]))?
-        } else { Default::default() };
+        } else {
+            Default::default()
+        };
         let placement = t.elapsed().as_secs_f64();
         let rpc_after_placement = rpc_accounting(&client, &server);
         let placement_statistics_after = placement_statistics(&cluster, args.run)?;
@@ -606,14 +694,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         start = end;
         balance_pending = false;
         if periodic_boundary {
-            let directory = args.checkpoint_directory.as_ref().unwrap().join(format!("rows-{end}-after-placement"));
+            let directory = args
+                .checkpoint_directory
+                .as_ref()
+                .unwrap()
+                .join(format!("rows-{end}-after-placement"));
             cluster.checkpoint_phase(&directory, end, &descriptor.sha256, false, true)?;
-            event(&mut events, json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_balance_and_placement", "next_input":end, "directory":directory}))?;
+            event(
+                &mut events,
+                json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_balance_and_placement", "next_input":end, "directory":directory}),
+            )?;
         }
         if args.checkpoint_at == Some(end) {
-            let directory = args.checkpoint_directory.as_ref().ok_or("checkpoint directory required")?;
+            let directory = args
+                .checkpoint_directory
+                .as_ref()
+                .ok_or("checkpoint directory required")?;
             cluster.checkpoint_completed(directory, end, &descriptor.sha256)?;
-            event(&mut events, json!({"event":"writer_checkpoint_complete", "next_input":end, "directory":directory, "owners":counts(&cluster)?}))?;
+            event(
+                &mut events,
+                json!({"event":"writer_checkpoint_complete", "next_input":end, "directory":directory, "owners":counts(&cluster)?}),
+            )?;
             return Ok(());
         }
     }
@@ -622,15 +723,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let validation = Instant::now();
         let mut membership = BTreeSet::new();
         for owner in 1..=2 {
-            match cluster.request_until(owner, EngineRequest::ValidateWriter, Instant::now()+Duration::from_secs(600))? {
-                EngineResponse::Membership(groups) => for (_, ids) in groups { for id in ids {
-                    if id >= args.rows || !membership.insert(id) { return Err("invalid global writer membership".into()); }
-                } },
+            match cluster.request_until(
+                owner,
+                EngineRequest::ValidateWriter,
+                Instant::now() + Duration::from_secs(600),
+            )? {
+                EngineResponse::Membership(groups) => {
+                    for (_, ids) in groups {
+                        for id in ids {
+                            if id >= args.rows || !membership.insert(id) {
+                                return Err("invalid global writer membership".into());
+                            }
+                        }
+                    }
+                }
                 _ => return Err("invalid writer validation response".into()),
             }
         }
-        if membership.len() as u64 != args.rows { return Err("incomplete writer membership".into()); }
-        fs::write(args.output.join("result.json"), serde_json::to_vec_pretty(&json!({"status":"writer_validated", "mode":if args.balance_only {"balance_only"} else {"construction"}, "add_skipped_for_balance_replay":args.balance_only, "rows":args.rows,"resume_input":resume_input,"construction_seconds":construction,"cycles":cycles,"owners":counts(&cluster)?,"validation_seconds":validation.elapsed().as_secs_f64(),"validation":"exact global membership and every one-bit posting code checked against full-precision centroid and immutable vector","rpc_accounting":rpc_accounting(&client,&server)}))?)?;
+        if membership.len() as u64 != args.rows {
+            return Err("incomplete writer membership".into());
+        }
+        fs::write(
+            args.output.join("result.json"),
+            serde_json::to_vec_pretty(
+                &json!({"status":"writer_validated", "mode":if args.balance_only {"balance_only"} else {"construction"}, "add_skipped_for_balance_replay":args.balance_only, "rows":args.rows,"resume_input":resume_input,"construction_seconds":construction,"cycles":cycles,"owners":counts(&cluster)?,"validation_seconds":validation.elapsed().as_secs_f64(),"validation":"exact global membership and every one-bit posting code checked against full-precision centroid and immutable vector","rpc_accounting":rpc_accounting(&client,&server)}),
+            )?,
+        )?;
         return Ok(());
     }
 

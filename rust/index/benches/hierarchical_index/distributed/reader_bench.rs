@@ -74,14 +74,20 @@ pub fn load_queries(
             .ok_or_else(|| format!("query {} lacks exact references", row.query_id))?;
         let vector: Vec<f32> = row.vector.iter().map(|&x| x as f32).collect();
         if vector.len() != dimensions || vector.iter().any(|x| !x.is_finite()) {
-            return Err(format!("query {} has invalid values or dimension", row.query_id));
+            return Err(format!(
+                "query {} has invalid values or dimension",
+                row.query_id
+            ));
         }
         if t.ids.is_empty()
             || t.ids.len() != t.distances.len()
             || t.distances.windows(2).any(|w| !(w[0] <= w[1]))
             || t.ids.iter().collect::<BTreeSet<_>>().len() != t.ids.len()
         {
-            return Err(format!("query {} has malformed exact references", row.query_id));
+            return Err(format!(
+                "query {} has malformed exact references",
+                row.query_id
+            ));
         }
         out.push(BenchQuery {
             id: row.query_id,
@@ -226,7 +232,8 @@ pub fn stats(values: &[f64]) -> Option<Stats> {
     }
     let mut sorted = values.to_vec();
     sorted.sort_by(f64::total_cmp);
-    let rank = |p: f64| sorted[((p * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len()) - 1];
+    let rank =
+        |p: f64| sorted[((p * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len()) - 1];
     Some(Stats {
         count: sorted.len(),
         mean: sorted.iter().sum::<f64>() / sorted.len() as f64,
@@ -239,7 +246,13 @@ pub fn stats(values: &[f64]) -> Option<Stats> {
 
 /// Distinct 4 KB pages that hold the given corpus rows. A 3,072-byte row
 /// crosses a page boundary about half the time.
-pub fn distinct_pages(rows: &[u64], first_id: u64, offset: u64, stride: u64, row_bytes: u64) -> u64 {
+pub fn distinct_pages(
+    rows: &[u64],
+    first_id: u64,
+    offset: u64,
+    stride: u64,
+    row_bytes: u64,
+) -> u64 {
     let mut pages = BTreeSet::new();
     for &id in rows {
         let start = offset + (id - first_id) * stride;
@@ -472,7 +485,10 @@ pub fn walk_diagnostics(
             None => break,
         };
         let scored = parents.iter().map(|p| tree.child_count(*p)).sum();
-        let internal: BTreeSet<u128> = frontiers.get(level).map(|f| f.iter().copied().collect()).unwrap_or_default();
+        let internal: BTreeSet<u128> = frontiers
+            .get(level)
+            .map(|f| f.iter().copied().collect())
+            .unwrap_or_default();
         let leaves_here = leaf_depth.values().filter(|d| **d == level).count();
         let reached = paths
             .iter()
@@ -505,17 +521,32 @@ pub fn walk_diagnostics(
 /// Rank every leaf by exact squared distance from the query to its float32
 /// centroid, and return the rank (0 = nearest) of each true neighbor's leaf.
 /// Ties in distance break by leaf ID.
-pub fn exact_leaf_ranks(centroids: &[(u128, &[f32])], query: &[f32], truth: &[(u64, u128)]) -> Vec<usize> {
+pub fn exact_leaf_ranks(
+    centroids: &[(u128, &[f32])],
+    query: &[f32],
+    truth: &[(u64, u128)],
+) -> Vec<usize> {
     let mut scored: Vec<(f64, u128)> = centroids
         .iter()
         .map(|(id, c)| {
-            let d: f64 = c.iter().zip(query).map(|(a, b)| ((*a - *b) as f64).powi(2)).sum();
+            let d: f64 = c
+                .iter()
+                .zip(query)
+                .map(|(a, b)| ((*a - *b) as f64).powi(2))
+                .sum();
             (d, *id)
         })
         .collect();
     scored.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    let rank: HashMap<u128, usize> = scored.iter().enumerate().map(|(i, (_, id))| (*id, i)).collect();
-    truth.iter().map(|(_, leaf)| rank.get(leaf).copied().unwrap_or(usize::MAX)).collect()
+    let rank: HashMap<u128, usize> = scored
+        .iter()
+        .enumerate()
+        .map(|(i, (_, id))| (*id, i))
+        .collect();
+    truth
+        .iter()
+        .map(|(_, leaf)| rank.get(leaf).copied().unwrap_or(usize::MAX))
+        .collect()
 }
 
 #[cfg(test)]

@@ -1421,7 +1421,14 @@ impl OwnerService {
                 input_sha256,
                 balance_pending,
             } => {
-                self.write_checkpoint(run, epoch, &path, next_input, input_sha256, balance_pending)?;
+                self.write_checkpoint(
+                    run,
+                    epoch,
+                    &path,
+                    next_input,
+                    input_sha256,
+                    balance_pending,
+                )?;
                 Ok(EngineResponse::Ack)
             }
             EngineRequest::OwnerTransfer(request) => self
@@ -3033,7 +3040,9 @@ impl OwnerService {
             view: (*cluster.current_view()).clone(),
             inserted: cluster.inserted_ids.lock().clone(),
         };
-        if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
         let bytes = serde_json::to_vec(&checkpoint).map_err(|e| e.to_string())?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -3053,7 +3062,9 @@ impl OwnerService {
             .and_then(|_| checksum.sync_all())
             .map_err(|e| e.to_string())?;
         if let Some(parent) = path.parent() {
-            std::fs::File::open(parent).and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
+            std::fs::File::open(parent)
+                .and_then(|file| file.sync_all())
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -3141,20 +3152,41 @@ impl Cluster {
             )?;
         }
         use std::io::Write;
-        let mut marker = std::fs::OpenOptions::new().write(true).create_new(true)
-            .open(directory.join("complete.json.tmp")).map_err(|e| e.to_string())?;
-        marker.write_all(serde_json::to_string(&serde_json::json!({
-            "next_input": next_input, "balance_pending": balance_pending,
-            "input_sha256": input_sha256, "owners": owners, "epoch": epoch,
-            "run": run.to_string()
-        })).map_err(|e| e.to_string())?.as_bytes()).map_err(|e| e.to_string())?;
+        let mut marker = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join("complete.json.tmp"))
+            .map_err(|e| e.to_string())?;
+        marker
+            .write_all(
+                serde_json::to_string(&serde_json::json!({
+                    "next_input": next_input, "balance_pending": balance_pending,
+                    "input_sha256": input_sha256, "owners": owners, "epoch": epoch,
+                    "run": run.to_string()
+                }))
+                .map_err(|e| e.to_string())?
+                .as_bytes(),
+            )
+            .map_err(|e| e.to_string())?;
         marker.sync_all().map_err(|e| e.to_string())?;
-        std::fs::rename(directory.join("complete.json.tmp"), directory.join("complete.json")).map_err(|e| e.to_string())?;
-        std::fs::File::open(directory).and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
+        std::fs::rename(
+            directory.join("complete.json.tmp"),
+            directory.join("complete.json"),
+        )
+        .map_err(|e| e.to_string())?;
+        std::fs::File::open(directory)
+            .and_then(|file| file.sync_all())
+            .map_err(|e| e.to_string())?;
         if continue_build {
             let next_epoch = epoch.checked_add(1).ok_or("checkpoint epoch exhausted")?;
             for owner in owners {
-                self.request(owner, EngineRequest::OpenEpoch { run, epoch: next_epoch })?;
+                self.request(
+                    owner,
+                    EngineRequest::OpenEpoch {
+                        run,
+                        epoch: next_epoch,
+                    },
+                )?;
             }
         }
         Ok(())
@@ -3236,9 +3268,15 @@ mod writer_checkpoint_tests {
         cluster.balance(2).unwrap();
         cluster.add_batch(&[64], 1).unwrap();
         let next = directory.path().join("next");
-        cluster.checkpoint_phase(&next, 65, "fixture", false, true).unwrap();
+        cluster
+            .checkpoint_phase(&next, 65, "fixture", false, true)
+            .unwrap();
         assert_eq!(original.epoch.load(Ordering::Acquire), 2);
-        assert!(!WriterCheckpoint::read(&next.join("owner-1.json")).unwrap().balance_pending);
+        assert!(
+            !WriterCheckpoint::read(&next.join("owner-1.json"))
+                .unwrap()
+                .balance_pending
+        );
         let sequence = checkpoint.sequence;
         let shared_sequence = checkpoint.shared_sequence;
         let view = serde_json::to_vec(&checkpoint.view).unwrap();
