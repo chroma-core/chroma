@@ -169,6 +169,10 @@ struct Args {
     /// Longest a scan request may take, on both the client and the server.
     #[arg(long, default_value_t = 120)]
     scan_timeout_seconds: u64,
+    /// Persistent request threads per remote owner on the query machine; at
+    /// least --cold-threads, or remote requests queue for a worker.
+    #[arg(long, default_value_t = 64)]
+    remote_workers: usize,
 }
 fn transport_config(args: &Args) -> TransportConfig {
     TransportConfig {
@@ -964,7 +968,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 let (owner, data, control) = parse_remote(spec)?;
                 let client = RpcClient::new(data, control, read_token(args)?, transport_config(args))
                     .map_err(|e| format!("{e:?}"))?;
-                remotes.push(RemoteOwner { owner, client });
+                remotes.push(RemoteOwner::new(owner, client, args.remote_workers));
             }
             let placement = placement(args, &reader)?;
             let all: BTreeSet<u64> = placement.leaves_by_part().into_keys().collect();
@@ -991,6 +995,9 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 deadline: Duration::from_secs(args.scan_timeout_seconds),
             });
             owner_query.as_ref().unwrap().check_owners()?;
+            if !owner_query.as_ref().unwrap().remotes.is_empty() && args.remote_workers < args.cold_threads {
+                return Err("--remote-workers must be at least --cold-threads, or remote requests queue for a worker".into());
+            }
             if !owner_query.as_ref().unwrap().remotes.is_empty() && args.cold_threads > 64 {
                 return Err("the scan server accepts at most 64 requests at once; use --cold-threads 64 or fewer".into());
             }
@@ -1050,6 +1057,11 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         };
         for &pass in &passes {
             let network = rb::network_received_bytes();
+            let usage = rb::ProcessUsage::now();
+            let started_unix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(f64::NAN);
             let t = Instant::now();
             let results: Vec<Value> = if pass == "cold" {
                 cold_pass(&cx, &queries, args.cold_threads)?
@@ -1061,6 +1073,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     .collect::<Result<_, _>>()?
             };
             let seconds = t.elapsed().as_secs_f64();
+            let usage = rb::ProcessUsage::now().zip(usage).map(|(after, before)| after.since(&before, seconds));
             let network = rb::network_received_bytes()
                 .zip(network)
                 .map(|(after, before)| after.saturating_sub(before));
@@ -1068,7 +1081,12 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_writer(&mut records, r)?;
                 records.write_all(b"\n")?;
             }
-            let summary = summarize(&results, seconds, network);
+            let mut summary = summarize(&results, seconds, network);
+            // The whole process over the pass, so 32-thread passes, whose
+            // per-query CPU is not recorded, still report the cores they used.
+            summary["process_cpu"] = usage.unwrap_or(Value::Null);
+            summary["started_unix"] = json!(started_unix);
+            summary["finished_unix"] = json!(started_unix + seconds);
             let num = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
             println!(
                 "{} {}: recall@{} {:.4}, p50 {:.2} ms, p99 {:.2} ms, {:.1} qps",

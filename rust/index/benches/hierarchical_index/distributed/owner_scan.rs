@@ -752,10 +752,93 @@ impl ScanEngine {
     }
 }
 
-/// A remote owner as seen from the query machine.
+/// A job a remote owner's worker runs: one scan request and its reply.
+type RemoteJob = Box<dyn FnOnce() + Send>;
+
+/// A remote owner as seen from the query machine. Its scan requests run on
+/// persistent worker threads, so a query hands each remote part to a waiting
+/// thread instead of starting one. Starting a thread per part per query cost
+/// tens of milliseconds under 32 concurrent queries.
 pub struct RemoteOwner {
     pub owner: u64,
     pub client: RpcClient,
+    jobs: std::sync::mpsc::Sender<RemoteJob>,
+}
+impl RemoteOwner {
+    /// `workers` bounds the requests in flight to this owner; it should be at
+    /// least the number of concurrent queries, or requests queue for a worker.
+    pub fn new(owner: u64, client: RpcClient, workers: usize) -> Arc<Self> {
+        let (jobs, receiver) = std::sync::mpsc::channel::<RemoteJob>();
+        let receiver = Arc::new(Mutex::new(receiver));
+        for i in 0..workers.max(1) {
+            let receiver = receiver.clone();
+            std::thread::Builder::new()
+                .name(format!("owner-{owner}-scan-{i}"))
+                .spawn(move || loop {
+                    let job = match receiver.lock().unwrap().recv() {
+                        Ok(job) => job,
+                        Err(_) => break,
+                    };
+                    // A panicking job drops its reply sender, which the query
+                    // sees as a failed part; the worker keeps serving.
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                })
+                .expect("start remote scan worker");
+        }
+        Arc::new(Self { owner, client, jobs })
+    }
+    fn submit(&self, job: RemoteJob) -> Result<()> {
+        self.jobs
+            .send(job)
+            .map_err(|_| format!("owner {} scan workers stopped", self.owner))
+    }
+    /// One scan request with retries, run on a worker thread. `queued` is when
+    /// the query handed the request over.
+    fn scan(&self, request: ScanRequest, deadline: Duration, queued: Instant) -> Result<(OwnerPart, Vec<(u64, f32)>)> {
+        let t = Instant::now();
+        let client_spawn_ns = (t - queued).as_nanos() as u64;
+        let before = self.client.counters();
+        // A scan only reads, so a failed attempt (a reset connection, a
+        // storage error on the owner) is retried.
+        let mut attempt = 1;
+        let reply: ScanReply = loop {
+            match self.client.call(&request, RequestClass::Data, Instant::now() + deadline) {
+                Ok(reply) => break reply,
+                Err(e) if attempt < SCAN_ATTEMPTS => {
+                    eprintln!("owner {} scan attempt {attempt} failed, retrying: {e}", self.owner);
+                    std::thread::sleep(Duration::from_millis(50 * attempt as u64));
+                    attempt += 1;
+                }
+                Err(e) => return Err(format!("owner {} scan failed: {e}", self.owner)),
+            }
+        };
+        let call = last_call_timing();
+        let (sent, received) = delta(&self.client.counters(), &before);
+        let decoding = Instant::now();
+        let results = reply.results.iter().map(|(id, d)| (*id, f32::from_bits(*d))).collect();
+        let client_results_ns = decoding.elapsed().as_nanos() as u64;
+        Ok((
+            OwnerPart {
+                owner: self.owner,
+                remote: true,
+                leaves: request.leaves.len(),
+                work: reply.work,
+                timing: reply.timing,
+                request_ns: t.elapsed().as_nanos() as u64,
+                client_spawn_ns,
+                client_build_ns: 0,
+                call,
+                client_results_ns,
+                server: reply.server,
+                server_handler_ns: reply.server_handler_ns,
+                remote_cpu_seconds: reply.cpu_seconds,
+                remote_heap_peak_bytes: reply.heap_peak_bytes,
+                transport_bytes_sent: sent,
+                transport_bytes_received: received,
+            },
+            results,
+        ))
+    }
 }
 /// Where one owner's share of a query ran and what it cost.
 #[derive(Clone, Debug, Default, Serialize)]
@@ -765,12 +848,14 @@ pub struct OwnerPart {
     pub leaves: usize,
     pub work: ScanWork,
     pub timing: ScanTiming,
-    /// Query-machine view of a remote request: request building to decoded
-    /// results. The fields below split it; all are zero for local parts.
+    /// Query-machine view of a remote request, from a worker picking it up to
+    /// decoded results; building and queueing come before it. The fields
+    /// below split it; all are zero for local parts.
     pub request_ns: u64,
-    /// Starting this owner's request thread on the query machine.
+    /// Waiting on the query machine for one of this owner's workers to pick
+    /// up the request, including the worker's wake-up.
     pub client_spawn_ns: u64,
-    /// Building the request (query bits and leaf IDs).
+    /// Building the request (query bits and leaf IDs), before it is queued.
     pub client_build_ns: u64,
     /// The transport call on the query machine: socket checkout, envelope
     /// encode, write, wait for the first reply byte, read and JSON decode.
@@ -804,7 +889,7 @@ pub struct OwnerQuery {
     pub local: Arc<ScanEngine>,
     /// Owners this process scans itself.
     pub local_owners: BTreeSet<u64>,
-    pub remotes: Vec<RemoteOwner>,
+    pub remotes: Vec<Arc<RemoteOwner>>,
     pub deadline: Duration,
 }
 fn delta(after: &TransportSnapshot, before: &TransportSnapshot) -> (u64, u64) {
@@ -850,94 +935,50 @@ impl OwnerQuery {
                 return Err(format!("no process serves owner {owner}"));
             }
         }
-        let (remote_parts, local_parts) = std::thread::scope(|scope| {
-            let jobs: Vec<_> = self
-                .remotes
-                .iter()
-                .filter_map(|remote| {
-                    let leaves = groups.get(&remote.owner)?;
-                    let spawned = Instant::now();
-                    Some(scope.spawn(move || -> Result<(OwnerPart, Vec<(u64, f32)>)> {
-                        let t = Instant::now();
-                        let client_spawn_ns = (t - spawned).as_nanos() as u64;
-                        let request = ScanRequest {
-                            query: query.iter().map(|x| x.to_bits()).collect(),
-                            leaves: leaves.clone(),
-                            k,
-                            rerank,
-                        };
-                        let client_build_ns = t.elapsed().as_nanos() as u64;
-                        let before = remote.client.counters();
-                        // A scan only reads, so a failed attempt (a reset
-                        // connection, a storage error on the owner) is retried.
-                        let mut attempt = 1;
-                        let reply: ScanReply = loop {
-                            match remote.client.call(&request, RequestClass::Data, Instant::now() + self.deadline) {
-                                Ok(reply) => break reply,
-                                Err(e) if attempt < SCAN_ATTEMPTS => {
-                                    eprintln!("owner {} scan attempt {attempt} failed, retrying: {e}", remote.owner);
-                                    std::thread::sleep(Duration::from_millis(50 * attempt as u64));
-                                    attempt += 1;
-                                }
-                                Err(e) => return Err(format!("owner {} scan failed: {e}", remote.owner)),
-                            }
-                        };
-                        let call = last_call_timing();
-                        let (sent, received) = delta(&remote.client.counters(), &before);
-                        let decoding = Instant::now();
-                        let results = reply.results.iter().map(|(id, d)| (*id, f32::from_bits(*d))).collect();
-                        let client_results_ns = decoding.elapsed().as_nanos() as u64;
-                        let request_ns = t.elapsed().as_nanos() as u64;
-                        Ok((
-                            OwnerPart {
-                                owner: remote.owner,
-                                remote: true,
-                                leaves: request.leaves.len(),
-                                work: reply.work,
-                                timing: reply.timing,
-                                request_ns,
-                                client_spawn_ns,
-                                client_build_ns,
-                                call,
-                                client_results_ns,
-                                server: reply.server,
-                                server_handler_ns: reply.server_handler_ns,
-                                remote_cpu_seconds: reply.cpu_seconds,
-                                remote_heap_peak_bytes: reply.heap_peak_bytes,
-                                transport_bytes_sent: sent,
-                                transport_bytes_received: received,
-                            },
-                            results,
-                        ))
-                    }))
-                })
-                .collect();
-            // Each local owner keeps its own shortlist, exactly as a remote
-            // owner would, so moving an owner between processes never changes
-            // the results.
-            let local: Vec<Result<(OwnerPart, Vec<(u64, f32)>)>> = groups
-                .iter()
-                .filter(|(owner, _)| self.local_owners.contains(owner))
-                .map(|(owner, leaves)| {
-                    let (results, work, timing) = self.local.scan(query, leaves, k, rerank)?;
-                    Ok((
-                        OwnerPart {
-                            owner: *owner,
-                            leaves: leaves.len(),
-                            work,
-                            timing,
-                            ..Default::default()
-                        },
-                        results,
-                    ))
-                })
-                .collect();
-            let remote: Vec<_> = jobs
-                .into_iter()
-                .map(|j| j.join().map_err(|_| "remote scan thread panicked".to_string())?)
-                .collect();
-            (remote, local)
-        });
+        // Hand each remote part to its owner's workers, scan the local parts
+        // on this thread meanwhile, then collect the replies. Arrival order
+        // does not matter: parts and merged results are sorted below.
+        let (replies, reply_receiver) = std::sync::mpsc::channel();
+        let mut remote_count = 0;
+        for remote in &self.remotes {
+            let Some(leaves) = groups.get(&remote.owner) else { continue };
+            let t = Instant::now();
+            let request = ScanRequest { query: query.iter().map(|x| x.to_bits()).collect(), leaves: leaves.clone(), k, rerank };
+            let client_build_ns = t.elapsed().as_nanos() as u64;
+            let (worker, replies, deadline, queued) = (remote.clone(), replies.clone(), self.deadline, Instant::now());
+            remote.submit(Box::new(move || {
+                let part = worker.scan(request, deadline, queued).map(|(mut part, results)| {
+                    part.client_build_ns = client_build_ns;
+                    (part, results)
+                });
+                let _ = replies.send(part);
+            }))?;
+            remote_count += 1;
+        }
+        drop(replies);
+        // Each local owner keeps its own shortlist, exactly as a remote owner
+        // would, so moving an owner between processes never changes the
+        // results.
+        let local_parts: Vec<Result<(OwnerPart, Vec<(u64, f32)>)>> = groups
+            .iter()
+            .filter(|(owner, _)| self.local_owners.contains(owner))
+            .map(|(owner, leaves)| {
+                let (results, work, timing) = self.local.scan(query, leaves, k, rerank)?;
+                Ok((
+                    OwnerPart {
+                        owner: *owner,
+                        leaves: leaves.len(),
+                        work,
+                        timing,
+                        ..Default::default()
+                    },
+                    results,
+                ))
+            })
+            .collect();
+        let remote_parts: Vec<Result<(OwnerPart, Vec<(u64, f32)>)>> = (0..remote_count)
+            .map(|_| reply_receiver.recv().unwrap_or_else(|_| Err("remote scan worker panicked".to_string())))
+            .collect();
         let t = Instant::now();
         let mut merged = vec![];
         for part in local_parts.into_iter().chain(remote_parts) {

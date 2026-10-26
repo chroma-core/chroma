@@ -912,3 +912,21 @@ fn v2_owner_routing_carries_an_optional_vector_store() {
         .is_err());
     }
 }
+
+#[test]
+fn parallel_child_scoring_matches_sequential_order_and_scores() {
+    let dir = tempfile::tempdir().unwrap();
+    let descriptor = setup(dir.path());
+    let reader = SavedReader::open(GenerationStore::open(dir.path()).unwrap(), &descriptor).unwrap();
+    // Repeat the internal nodes so the list splits into several runs.
+    let internal: Vec<NodeRef> = reader.nodes.values().filter(|n| !n.leaf).map(|n| n.reference()).collect();
+    let nodes: Vec<NodeRef> = internal.iter().cycle().take(internal.len() * 40).copied().collect();
+    let query = vec![0.3f32; reader.manifest.format.dimensions];
+    let mut sequential = vec![];
+    reader.score_children(&nodes, &query, None, &mut sequential).unwrap();
+    for run in [1, 3, 16, nodes.len() + 1] {
+        let mut parallel = vec![];
+        reader.score_children_parallel(&nodes, &query, run, &mut parallel).unwrap();
+        assert_eq!(parallel, sequential, "run of {run} nodes");
+    }
+}

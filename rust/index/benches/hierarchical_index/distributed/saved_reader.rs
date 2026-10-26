@@ -1284,9 +1284,38 @@ impl SavedReader {
         }
         Ok(())
     }
+    /// `score_children` with the nodes split into contiguous runs scored on
+    /// rayon's global pool and concatenated in order, so children come out in
+    /// exactly the sequential order. A wide beam expands about a thousand
+    /// nodes per level, which one thread scores in about 12 ms at 100M.
+    fn score_children_parallel(
+        &self,
+        nodes: &[NodeRef],
+        query: &[f32],
+        run: usize,
+        children: &mut Vec<ScoredChild>,
+    ) -> Result<()> {
+        use rayon::prelude::*;
+        if nodes.len() < run {
+            return self.score_children(nodes, query, None, children);
+        }
+        let runs = nodes
+            .par_chunks(run)
+            .map(|run| {
+                let mut scored = Vec::new();
+                self.score_children(run, query, None, &mut scored)?;
+                Ok(scored)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for run in runs {
+            children.extend(run);
+        }
+        Ok(())
+    }
     /// Walk the whole saved tree in this process. Every routing node is
-    /// resident, so no level builds owner requests, copies the query or starts
-    /// threads; beam selection and candidate order match `query` exactly.
+    /// resident, so no level builds owner requests or copies the query; a wide
+    /// level is scored on rayon's global pool. Beam selection and candidate
+    /// order match `query` exactly.
     pub fn navigate_local(
         &self,
         query: &[f32],
@@ -1403,6 +1432,9 @@ impl SavedReader {
         &self.metric
     }
 }
+/// Nodes per run when local navigation scores a level in parallel; a level
+/// with fewer nodes is scored on the calling thread.
+const PARALLEL_NAVIGATION_NODES: usize = 16;
 /// Navigation backend that treats every saved node as local.
 struct LocalNavigation<'a>(&'a SavedReader);
 impl ExpansionBackend for LocalNavigation<'_> {
@@ -1416,7 +1448,7 @@ impl ExpansionBackend for LocalNavigation<'_> {
         children: &mut Vec<ScoredChild>,
         _remote: &mut Vec<NodeRef>,
     ) -> Result<()> {
-        self.0.score_children(nodes, query, None, children)
+        self.0.score_children_parallel(nodes, query, PARALLEL_NAVIGATION_NODES, children)
     }
     fn expand(&self, _authority: u64, _requests: Vec<ExpandRequest>) -> Result<Vec<ExpandReply>> {
         Err("local navigation sends no expansion requests".into())

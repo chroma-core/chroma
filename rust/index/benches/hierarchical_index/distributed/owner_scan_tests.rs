@@ -234,7 +234,7 @@ fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
         reader: reader.clone(),
         local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap()),
         local_owners: [10].into(),
-        remotes: vec![RemoteOwner { owner: 20, client }],
+        remotes: vec![RemoteOwner::new(20, client, 2)],
         deadline: Duration::from_secs(10),
     };
     let together = all_local(&reader, &vectors);

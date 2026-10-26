@@ -330,6 +330,46 @@ pub fn heap_live() -> i64 {
     HEAP_LIVE.load(Ordering::Relaxed)
 }
 
+/// Whole-process CPU and context switches since the process started.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProcessUsage {
+    pub user_seconds: f64,
+    pub system_seconds: f64,
+    /// Switches where a thread waited (I/O, a lock, a channel).
+    pub voluntary_switches: i64,
+    /// Switches where the kernel preempted a runnable thread: a sign that
+    /// runnable threads outnumber the cores.
+    pub involuntary_switches: i64,
+}
+impl ProcessUsage {
+    pub fn now() -> Option<Self> {
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        if unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) } != 0 {
+            return None;
+        }
+        let secs = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 / 1e6;
+        Some(Self {
+            user_seconds: secs(usage.ru_utime),
+            system_seconds: secs(usage.ru_stime),
+            voluntary_switches: usage.ru_nvcsw as i64,
+            involuntary_switches: usage.ru_nivcsw as i64,
+        })
+    }
+    /// Usage between `earlier` and `self`, with the cores busy on average
+    /// over `seconds` of wall time.
+    pub fn since(&self, earlier: &Self, seconds: f64) -> serde_json::Value {
+        let user = self.user_seconds - earlier.user_seconds;
+        let system = self.system_seconds - earlier.system_seconds;
+        serde_json::json!({
+            "user_seconds": user,
+            "system_seconds": system,
+            "cores_busy": (user + system) / seconds,
+            "voluntary_switches": self.voluntary_switches - earlier.voluntary_switches,
+            "involuntary_switches": self.involuntary_switches - earlier.involuntary_switches,
+        })
+    }
+}
+
 /// User plus system CPU seconds for the whole process.
 pub fn process_cpu_seconds() -> f64 {
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
