@@ -1065,35 +1065,3 @@ impl StorageManager {
         read_cache_guard.shrink_to_fit();
     }
 }
-
-impl<'referred_data> Readable<'referred_data>
-    for chroma_types::hierarchical_spann::LegacyHierarchicalSpannPostingList<'referred_data>
-{
-    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
-        None
-    }
-
-    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
-        _: PrefixRange,
-        _: KeyRange,
-        _: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)>
-    where
-        PrefixRange: std::ops::RangeBounds<&'prefix str>,
-        KeyRange: std::ops::RangeBounds<KeyWrapper>,
-    {
-        vec![]
-    }
-
-    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
-        Ok(0)
-    }
-
-    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
-        false
-    }
-
-    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
-        0
-    }
-}

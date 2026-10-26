@@ -111,6 +111,7 @@ fn reference_writer(
                 navigation,
                 codes: vec![],
                 ids: vec![],
+                versions: vec![],
                 length: 0,
             })
         } else {

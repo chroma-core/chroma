@@ -9,7 +9,6 @@ use arrow::{
 };
 use chroma_types::hierarchical_spann::{
     HierarchicalSpannPostingList, HierarchicalSpannPostingListOwned,
-    LegacyHierarchicalSpannPostingList,
 };
 
 use crate::{
@@ -57,6 +56,7 @@ pub struct HierarchicalPostingListSizeTracker {
 pub struct HierarchicalPostingListArrowBuilder {
     codes: ListBuilder<FixedSizeListBuilder<UInt8Builder>>,
     ids: ListBuilder<UInt32Builder>,
+    versions: ListBuilder<UInt8Builder>,
 }
 
 impl ArrowWriteableValue for HierarchicalSpannPostingList<'_> {
@@ -105,6 +105,10 @@ impl ArrowWriteableValue for HierarchicalSpannPostingList<'_> {
                 UInt32Builder::with_capacity(tracker.vector_count),
                 tracker.cluster_count,
             ),
+            versions: ListBuilder::with_capacity(
+                UInt8Builder::with_capacity(tracker.vector_count),
+                tracker.cluster_count,
+            ),
         }
     }
 
@@ -115,7 +119,7 @@ impl ArrowWriteableValue for HierarchicalSpannPostingList<'_> {
     fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
         let code_length = value.codes.len() / value.ids.len().max(1);
         let inner_codes = builder.codes.values();
-        for chunk in value.codes.chunks(code_length.max(1)) {
+        for chunk in value.codes.chunks(code_length) {
             inner_codes.values().append_slice(chunk);
             inner_codes.append(true);
         }
@@ -123,6 +127,9 @@ impl ArrowWriteableValue for HierarchicalSpannPostingList<'_> {
 
         builder.ids.values().append_slice(&value.ids);
         builder.ids.append(true);
+
+        builder.versions.values().append_slice(&value.versions);
+        builder.versions.append(true);
     }
 
     fn finish(
@@ -146,9 +153,15 @@ impl ArrowWriteableValue for HierarchicalSpannPostingList<'_> {
             DataType::List(Arc::new(Field::new("item", DataType::UInt32, true))),
             true,
         );
+        let versions_field = Field::new(
+            "versions",
+            DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+            true,
+        );
 
         let codes_array = builder.codes.finish();
         let ids_array = builder.ids.finish();
+        let versions_array = builder.versions.finish();
 
         let struct_array = StructArray::from(vec![
             (
@@ -156,9 +169,13 @@ impl ArrowWriteableValue for HierarchicalSpannPostingList<'_> {
                 Arc::new(codes_array) as ArrayRef,
             ),
             (Arc::new(ids_field.clone()), Arc::new(ids_array) as ArrayRef),
+            (
+                Arc::new(versions_field.clone()),
+                Arc::new(versions_array) as ArrayRef,
+            ),
         ]);
 
-        let struct_fields = Fields::from(vec![codes_field, ids_field]);
+        let struct_fields = Fields::from(vec![codes_field, ids_field, versions_field]);
         let value_field = Field::new("value", DataType::Struct(struct_fields), true);
         let value_arr = (&struct_array as &dyn Array).slice(0, struct_array.len());
 
@@ -178,64 +195,6 @@ impl ArrowWriteableValue for HierarchicalSpannPostingList<'_> {
 }
 
 impl<'data> ArrowReadableValue<'data> for HierarchicalSpannPostingList<'data> {
-    fn get(array: &'data Arc<dyn Array>, index: usize) -> Self {
-        let struct_array = array
-            .as_any()
-            .downcast_ref::<StructArray>()
-            .expect("expected struct array");
-
-        assert_eq!(
-            struct_array.num_columns(),
-            2,
-            "legacy checkpoint requires explicit upgrade"
-        );
-        let codes_arr = get_list_array(struct_array, CODES_COLUMN);
-        let ids_arr = get_list_array(struct_array, IDS_COLUMN);
-
-        let codes_outer_start = codes_arr.value_offsets()[index] as usize;
-        let codes_outer_end = codes_arr.value_offsets()[index + 1] as usize;
-        let codes_inner = codes_arr
-            .values()
-            .as_any()
-            .downcast_ref::<FixedSizeListArray>()
-            .expect("expected fixed size list array");
-        let codes_start = codes_inner.value_offset(codes_outer_start) as usize;
-        let codes_end = codes_inner.value_offset(codes_outer_end) as usize;
-        let codes_values = codes_inner
-            .values()
-            .as_any()
-            .downcast_ref::<UInt8Array>()
-            .expect("expected uint8 array");
-        let codes = &codes_values.values()[codes_start..codes_end];
-
-        HierarchicalSpannPostingList {
-            codes,
-            ids: get_list_slice::<UInt32Type>(ids_arr, index),
-        }
-    }
-
-    fn get_range(array: &'data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
-        (offset..offset + length)
-            .map(|i| Self::get(array, i))
-            .collect()
-    }
-
-    fn add_to_delta<K: ArrowWriteableKey>(
-        prefix: &str,
-        key: K,
-        value: Self,
-        storage: &mut BlockStorage,
-    ) {
-        <HierarchicalSpannPostingList as ArrowWriteableValue>::add(
-            prefix,
-            key.into(),
-            value,
-            storage,
-        );
-    }
-}
-
-impl<'data> ArrowReadableValue<'data> for LegacyHierarchicalSpannPostingList<'data> {
     fn get(array: &'data Arc<dyn Array>, index: usize) -> Self {
         let struct_array = array
             .as_any()
@@ -262,7 +221,7 @@ impl<'data> ArrowReadableValue<'data> for LegacyHierarchicalSpannPostingList<'da
             .expect("expected uint8 array");
         let codes = &codes_values.values()[codes_start..codes_end];
 
-        LegacyHierarchicalSpannPostingList {
+        HierarchicalSpannPostingList {
             codes,
             ids: get_list_slice::<UInt32Type>(ids_arr, index),
             versions: get_list_slice::<UInt8Type>(versions_arr, index),
@@ -275,7 +234,17 @@ impl<'data> ArrowReadableValue<'data> for LegacyHierarchicalSpannPostingList<'da
             .collect()
     }
 
-    fn add_to_delta<K: ArrowWriteableKey>(_: &str, _: K, _: Self, _: &mut BlockStorage) {
-        panic!("legacy hierarchical postings are read-only; upgrade the checkpoint first");
+    fn add_to_delta<K: ArrowWriteableKey>(
+        prefix: &str,
+        key: K,
+        value: Self,
+        storage: &mut BlockStorage,
+    ) {
+        <HierarchicalSpannPostingList as ArrowWriteableValue>::add(
+            prefix,
+            key.into(),
+            value,
+            storage,
+        );
     }
 }

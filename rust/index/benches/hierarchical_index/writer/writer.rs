@@ -774,6 +774,16 @@ impl HierarchicalSpannWriter {
     // Navigate (f32 -- used by write path and --fp-navigation)
     // =========================================================================
 
+    /// Fixed-tree oracle for the sharded reader's beam-selection parity tests.
+    #[cfg(test)]
+    pub fn navigate_for_distributed_parity(
+        &self,
+        query: &[f32],
+        policy: &ReadBeamPolicy,
+    ) -> Vec<(NodeId, f32)> {
+        self.navigate_f32(query, policy)
+    }
+
     /// Beam search the tree using f32 centroid distances.
     /// Used by the write path (always) and search path when navigation=Fp.
     pub(super) fn navigate_f32(

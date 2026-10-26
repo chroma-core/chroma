@@ -97,6 +97,9 @@ pub fn clustering_thread_cpu_nanos() -> Option<u64> {
 thread_local! {
     static LAST_SPLIT_PROFILE: std::cell::RefCell<ClusteringProfileSnapshot> = std::cell::RefCell::new(ClusteringProfileSnapshot::default());
 }
+/// The split kernel records its work only when profiling is compiled in;
+/// production builds skip the clock reads and the shared counter.
+const SPLIT_PROFILING: bool = cfg!(any(test, feature = "clustering-profile"));
 struct SplitProfile {
     work: ClusteringProfileSnapshot,
     start: std::time::Instant,
@@ -111,12 +114,15 @@ impl SplitProfile {
                 ..Default::default()
             },
             start: std::time::Instant::now(),
-            cpu: clustering_thread_cpu_nanos(),
+            cpu: if SPLIT_PROFILING { clustering_thread_cpu_nanos() } else { None },
         }
     }
 }
 impl Drop for SplitProfile {
     fn drop(&mut self) {
+        if !SPLIT_PROFILING {
+            return;
+        }
         self.work.elapsed_nanos = self.start.elapsed().as_nanos().min(u64::MAX as u128) as u64;
         if let Some(cpu) = self
             .cpu

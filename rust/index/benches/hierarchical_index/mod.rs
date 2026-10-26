@@ -6,8 +6,7 @@ pub mod persistance;
 pub mod reader;
 pub mod writer;
 
-#[cfg(any(test, single_shard_owner))]
-pub mod owner;
-
-#[cfg(any(test, distributed_owner))]
+// The sharded reader and writer compile only into their own benches
+// (`--cfg distributed_owner`) and their test crate (feature `sharded-bench`).
+#[cfg(any(distributed_owner, feature = "sharded-bench"))]
 pub mod distributed;

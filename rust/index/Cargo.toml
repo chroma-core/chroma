@@ -7,6 +7,12 @@ autobenches = false
 [features]
 default = []
 usearch = ["dep:usearch"]
+# Compiles the sharded reader and writer (benches/hierarchical_index/distributed)
+# into the hierarchical_distributed test crate.
+sharded-bench = []
+# Counts work and thread CPU in the two-means split kernel, for the sharded
+# writer's profile. Off in production builds.
+clustering-profile = []
 
 [lib]
 path = "src/lib.rs"
@@ -95,14 +101,6 @@ harness = false
 required-features = ["usearch"]
 
 [[bench]]
-name = "single_shard_matched"
-harness = false
-
-[[bench]]
-name = "single_shard_attribution"
-harness = false
-
-[[bench]]
 name = "two_machine_spann"
 harness = false
 
@@ -113,3 +111,10 @@ harness = false
 [[bench]]
 name = "two_machine_correctness"
 harness = false
+
+[[test]]
+name = "hierarchical_distributed"
+required-features = ["sharded-bench"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(distributed_owner)"] }
