@@ -183,6 +183,21 @@ mod tests {
     use chroma_storage::{local::LocalStorage, Storage};
     use simsimd::SpatialSimilarity;
 
+    #[test]
+    fn level_beam_maxes_cap_their_level_only() {
+        let policy = ReadBeamPolicy::uniform(None, 512, 512).with_level_beam_maxes(vec![0, 64]);
+        let caps: Vec<(usize, usize)> = (1..=3)
+            .map(|l| {
+                let p = policy.level_params(l);
+                (p.beam_min, p.beam_max)
+            })
+            .collect();
+        assert_eq!(caps, vec![(512, 512), (64, 64), (512, 512)]);
+        let floors = ReadBeamPolicy::uniform(None, 512, 4096).with_level_beam_mins(vec![0, 16]);
+        assert_eq!(floors.level_params(2).beam_min, 16);
+        assert_eq!(floors.level_params(1).beam_min, 512);
+    }
+
     async fn saved_reader(
         dim: usize,
         count: u32,

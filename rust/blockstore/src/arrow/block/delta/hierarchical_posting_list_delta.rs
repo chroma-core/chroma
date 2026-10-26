@@ -104,7 +104,7 @@ impl HierarchicalPostingListDelta {
         let code_length = inner
             .storage
             .values()
-            .next()
+            .find(|v| !v.ids.is_empty())
             .map(|v| v.codes.len() / v.ids.len().max(1))
             .unwrap_or(0);
 
@@ -112,8 +112,7 @@ impl HierarchicalPostingListDelta {
         // - prefix_size / key_size: composite key strings and data
         // - codes:    List<FixedSizeList<u8>>, vector_count * code_length bytes
         // - ids:      List<u32>, vector_count * 4 bytes
-        // - versions: List<u8>,  vector_count bytes
-        // - offsets:  3 outer-list offset arrays (codes, ids, versions), each (cluster_count+1) i32
+        // - offsets:  2 outer-list offset arrays (codes, ids), each (cluster_count+1) i32
         // - key offsets: key-type-specific
         bit_util::round_upto_multiple_of_64(inner.prefix_size)
             + bit_util::round_upto_multiple_of_64(inner.key_size)
@@ -121,8 +120,7 @@ impl HierarchicalPostingListDelta {
                 inner.vector_count * code_length * size_of::<u8>(),
             )
             + bit_util::round_upto_multiple_of_64(inner.vector_count * size_of::<u32>())
-            + bit_util::round_upto_multiple_of_64(inner.vector_count * size_of::<u8>())
-            + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3
+            + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 2
             + K::offset_size(cluster_count)
     }
 
@@ -167,7 +165,7 @@ impl HierarchicalPostingListDelta {
         let code_length = inner
             .storage
             .values()
-            .next()
+            .find(|v| !v.ids.is_empty())
             .map(|v| v.codes.len() / v.ids.len().max(1))
             .unwrap_or(0);
 
@@ -187,8 +185,7 @@ impl HierarchicalPostingListDelta {
                 + bit_util::round_upto_multiple_of_64(key_size)
                 + bit_util::round_upto_multiple_of_64(vector_count * code_length * size_of::<u8>())
                 + bit_util::round_upto_multiple_of_64(vector_count * size_of::<u32>())
-                + bit_util::round_upto_multiple_of_64(vector_count * size_of::<u8>())
-                + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3
+                + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 2
                 + K::offset_size(cluster_count);
 
             if total_size > split_size {
@@ -221,7 +218,7 @@ impl HierarchicalPostingListDelta {
         let code_length = inner
             .storage
             .values()
-            .next()
+            .find(|v| !v.ids.is_empty())
             .map(|v| v.codes.len() / v.ids.len().max(1))
             .unwrap_or(0);
 

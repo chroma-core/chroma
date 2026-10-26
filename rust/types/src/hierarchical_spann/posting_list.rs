@@ -4,12 +4,11 @@ use std::mem::size_of_val;
 pub struct HierarchicalSpannPostingList<'data> {
     pub codes: &'data [u8],
     pub ids: &'data [u32],
-    pub versions: &'data [u8],
 }
 
 impl HierarchicalSpannPostingList<'_> {
     pub fn compute_size(&self) -> usize {
-        size_of_val(self.codes) + size_of_val(self.ids) + size_of_val(self.versions)
+        size_of_val(self.codes) + size_of_val(self.ids)
     }
 }
 
@@ -17,7 +16,6 @@ impl HierarchicalSpannPostingList<'_> {
 pub struct HierarchicalSpannPostingListOwned {
     pub codes: Vec<u8>,
     pub ids: Vec<u32>,
-    pub versions: Vec<u8>,
 }
 
 impl From<HierarchicalSpannPostingList<'_>> for HierarchicalSpannPostingListOwned {
@@ -25,7 +23,6 @@ impl From<HierarchicalSpannPostingList<'_>> for HierarchicalSpannPostingListOwne
         Self {
             codes: value.codes.to_vec(),
             ids: value.ids.to_vec(),
-            versions: value.versions.to_vec(),
         }
     }
 }
@@ -35,7 +32,21 @@ impl<'data> From<&'data HierarchicalSpannPostingListOwned> for HierarchicalSpann
         Self {
             codes: &value.codes,
             ids: &value.ids,
-            versions: &value.versions,
         }
+    }
+}
+
+/// Versioned rows are read only by the explicit checkpoint upgrader.
+
+#[derive(Clone, Debug)]
+pub struct LegacyHierarchicalSpannPostingList<'data> {
+    pub codes: &'data [u8],
+    pub ids: &'data [u32],
+    pub versions: &'data [u8],
+}
+
+impl LegacyHierarchicalSpannPostingList<'_> {
+    pub fn compute_size(&self) -> usize {
+        size_of_val(self.codes) + size_of_val(self.ids) + size_of_val(self.versions)
     }
 }

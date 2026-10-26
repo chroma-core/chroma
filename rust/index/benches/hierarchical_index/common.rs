@@ -160,6 +160,12 @@ pub struct ReadBeamPolicy {
     pub(super) level_taus: Vec<Option<f64>>,
     pub(super) level_min_pcts: Vec<f64>,
     pub(super) level_widths: Vec<usize>,
+    /// Per-level caps that replace `default_beam_max` at their level; 0 or
+    /// a missing entry keeps the default.
+    pub(super) level_beam_maxes: Vec<usize>,
+    /// Per-level floors that replace `default_beam_min` at their level; 0 or
+    /// a missing entry keeps the default.
+    pub(super) level_beam_mins: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -178,7 +184,21 @@ impl ReadBeamPolicy {
             level_taus: Vec::new(),
             level_min_pcts: Vec::new(),
             level_widths: Vec::new(),
+            level_beam_maxes: Vec::new(),
+            level_beam_mins: Vec::new(),
         }
+    }
+
+    /// Floor the beam separately at each level (1-indexed by position).
+    pub fn with_level_beam_mins(mut self, mins: Vec<usize>) -> Self {
+        self.level_beam_mins = mins;
+        self
+    }
+
+    /// Cap the beam separately at each level (1-indexed by position).
+    pub fn with_level_beam_maxes(mut self, maxes: Vec<usize>) -> Self {
+        self.level_beam_maxes = maxes;
+        self
     }
 
     pub fn with_level_overrides(
@@ -196,6 +216,8 @@ impl ReadBeamPolicy {
             level_taus,
             level_min_pcts,
             level_widths,
+            level_beam_maxes: Vec::new(),
+            level_beam_mins: Vec::new(),
         }
     }
 
@@ -209,10 +231,10 @@ impl ReadBeamPolicy {
     ///      level width: `floor = max(default_beam_min,
     ///      ceil(level_width * pct/100))`. When `level_min_pcts` has no
     ///      entry for this level, the floor is just `default_beam_min`.
-    ///   3. Cap absolutely with `default_beam_max` (`--write-beam-max` /
-    ///      `--read-beam-max`). This applies at every level, not just
-    ///      the leaf, so a per-level percentage floor cannot blow past
-    ///      the user's hard cap.
+    ///   3. Cap absolutely with `level_beam_maxes[idx]` when set, else
+    ///      `default_beam_max` (`--write-beam-max` / `--read-beam-max`).
+    ///      This applies at every level, not just the leaf, so a per-level
+    ///      percentage floor cannot blow past the user's hard cap.
     ///   4. Defensive clamp: if a high `min_pct` produced a floor above
     ///      `default_beam_max`, the cap wins
     ///      (`beam_min = beam_min.min(beam_max)`).
@@ -225,11 +247,18 @@ impl ReadBeamPolicy {
             (Some(width), Some(pct)) => Some(((width as f64) * (pct / 100.0)).ceil() as usize),
             _ => None,
         };
-        let beam_min = match scaled_floor {
-            Some(floor) => floor.max(self.default_beam_min),
-            None => self.default_beam_min,
+        let default_min = match self.level_beam_mins.get(idx) {
+            Some(&floor) if floor > 0 => floor,
+            _ => self.default_beam_min,
         };
-        let beam_max = self.default_beam_max;
+        let beam_min = match scaled_floor {
+            Some(floor) => floor.max(default_min),
+            None => default_min,
+        };
+        let beam_max = match self.level_beam_maxes.get(idx) {
+            Some(&cap) if cap > 0 => cap,
+            _ => self.default_beam_max,
+        };
         let beam_min = beam_min.min(beam_max);
 
         LevelBeamParams {
