@@ -876,9 +876,28 @@ pub struct OwnerPart {
 pub struct QueryRecord {
     pub navigation: NavigationWork,
     pub navigation_ns: u64,
+    /// Queries in flight in this process when this one started, itself
+    /// included, and whether navigation therefore ran in parallel.
+    pub queries_in_flight: usize,
+    pub navigation_parallel: bool,
     pub parts: Vec<OwnerPart>,
     pub merge_ns: u64,
     pub total: ScanWork,
+}
+
+/// Queries in flight in this process, counted by `OwnerQuery::query`.
+static QUERIES_IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Takes one query out of `QUERIES_IN_FLIGHT` when it finishes or fails.
+struct InFlight;
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        QUERIES_IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+/// Cores this process may use.
+fn cores() -> usize {
+    static CORES: OnceLock<usize> = OnceLock::new();
+    *CORES.get_or_init(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1))
 }
 
 /// The query machine: local navigation, per-owner scans and the merge.
@@ -917,11 +936,20 @@ impl OwnerQuery {
         policy: &ReadBeamPolicy,
         rerank: usize,
     ) -> Result<(Vec<(u64, f32)>, QueryRecord)> {
+        // Parallel navigation pays only on idle cores. With as many queries
+        // in flight as cores, its pool dispatch and idle spinning take CPU
+        // from the other queries, so each query then navigates on its own
+        // thread.
+        let queries_in_flight = QUERIES_IN_FLIGHT.fetch_add(1, Ordering::Relaxed) + 1;
+        let _in_flight = InFlight;
+        let navigation_parallel = queries_in_flight < cores();
         let t = Instant::now();
-        let (leaves, navigation) = self.reader.navigate_local(query, policy)?;
+        let (leaves, navigation) = self.reader.navigate_local_with(query, policy, navigation_parallel)?;
         let mut record = QueryRecord {
             navigation,
             navigation_ns: t.elapsed().as_nanos() as u64,
+            queries_in_flight,
+            navigation_parallel,
             ..Default::default()
         };
         let mut groups: BTreeMap<u64, Vec<u128>> = BTreeMap::new();

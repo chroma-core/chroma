@@ -1321,6 +1321,16 @@ impl SavedReader {
         query: &[f32],
         policy: &ReadBeamPolicy,
     ) -> Result<(Vec<(NodeRef, f32)>, NavigationWork)> {
+        self.navigate_local_with(query, policy, true)
+    }
+    /// `navigate_local` that scores every level on the calling thread when
+    /// `parallel` is false. Both modes return identical leaves and scores.
+    pub fn navigate_local_with(
+        &self,
+        query: &[f32],
+        policy: &ReadBeamPolicy,
+        parallel: bool,
+    ) -> Result<(Vec<(NodeRef, f32)>, NavigationWork)> {
         if query.len() != self.manifest.format.dimensions || query.iter().any(|x| !x.is_finite()) {
             return Err("invalid query dimension or values".into());
         }
@@ -1329,7 +1339,7 @@ impl SavedReader {
             return Ok((vec![(root.reference(), 0.0)], NavigationWork::default()));
         }
         let (mut leaves, work) = routing::navigate_batch(
-            &LocalNavigation(self),
+            &LocalNavigation { reader: self, parallel },
             &root.routing(self.manifest.format.dimensions),
             &[query.to_vec()],
             policy,
@@ -1435,8 +1445,12 @@ impl SavedReader {
 /// Nodes per run when local navigation scores a level in parallel; a level
 /// with fewer nodes is scored on the calling thread.
 const PARALLEL_NAVIGATION_NODES: usize = 16;
-/// Navigation backend that treats every saved node as local.
-struct LocalNavigation<'a>(&'a SavedReader);
+/// Navigation backend that treats every saved node as local; `parallel`
+/// scores wide levels on rayon's global pool.
+struct LocalNavigation<'a> {
+    reader: &'a SavedReader,
+    parallel: bool,
+}
 impl ExpansionBackend for LocalNavigation<'_> {
     fn expand_local_nodes(
         &self,
@@ -1448,7 +1462,11 @@ impl ExpansionBackend for LocalNavigation<'_> {
         children: &mut Vec<ScoredChild>,
         _remote: &mut Vec<NodeRef>,
     ) -> Result<()> {
-        self.0.score_children_parallel(nodes, query, PARALLEL_NAVIGATION_NODES, children)
+        if self.parallel {
+            self.reader.score_children_parallel(nodes, query, PARALLEL_NAVIGATION_NODES, children)
+        } else {
+            self.reader.score_children(nodes, query, None, children)
+        }
     }
     fn expand(&self, _authority: u64, _requests: Vec<ExpandRequest>) -> Result<Vec<ExpandReply>> {
         Err("local navigation sends no expansion requests".into())

@@ -146,6 +146,9 @@ fn local_navigation_reaches_the_same_leaves_as_remote_expansion() {
         let policy = ReadBeamPolicy::uniform(None, beam, beam);
         for q in queries() {
             let (local, local_work) = reader.navigate_local(&q, &policy).unwrap();
+            let (sequential, sequential_work) = reader.navigate_local_with(&q, &policy, false).unwrap();
+            assert_eq!(sequential, local);
+            assert_eq!(sequential_work.distances, local_work.distances);
             let (expected, work) = routing::navigate_batch(
                 reader.as_ref(),
                 &reader.root_routing(),

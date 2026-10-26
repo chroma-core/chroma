@@ -504,6 +504,8 @@ fn answer(cx: &BenchContext, q: &BenchQuery, alone: bool) -> Result<Answer, Stri
                 }),
                 owners: json!({
                     "navigation_seconds": record.navigation_ns as f64 / 1e9,
+                    "queries_in_flight": record.queries_in_flight,
+                    "navigation_parallel": record.navigation_parallel,
                     "merge_seconds": record.merge_ns as f64 / 1e9,
                     "owners_contacted": record.parts.len(),
                     "remote_request_seconds": remote_request.map(|n| n as f64 / 1e9),
