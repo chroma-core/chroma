@@ -1,0 +1,922 @@
+{
+ "configurations": [
+  {
+   "name": "k10-rr10-leaftau1.15-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.15
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.2-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.2
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.25-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.25
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.3-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.3
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.35-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.35
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.4-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.4
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.5-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.5
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.6-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.6
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.8-min16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.8
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.15-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.15
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.2-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.2
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.25-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.25
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.3-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.3
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.35-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.35
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.4-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.4
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.5-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.5
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.6-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.6
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.8-min64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.8
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.15-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.15
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.2-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.2
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.25-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.25
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.3-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.3
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.35-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.35
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.4-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.4
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.5-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.5
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.6-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.6
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k10-rr10-leaftau1.8-min128",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.8
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.15-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.15
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.2-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.2
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.25-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.25
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.3-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.3
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.35-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.35
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.4-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.4
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.5-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.5
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.6-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.6
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.8-min16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.8
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.15-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.15
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.2-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.2
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.25-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.25
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.3-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.3
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.35-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.35
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.4-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.4
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.5-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.5
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.6-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.6
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.8-min64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.8
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.15-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.15
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.2-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.2
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.25-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.25
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.3-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.3
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.35-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.35
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.4-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.4
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.5-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.5
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.6-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.6
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "name": "k100-rr4-leaftau1.8-min128",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 8192,
+   "level_tau": [
+    null,
+    null,
+    1.8
+   ],
+   "level_beam_min": [
+    0,
+    0,
+    128
+   ]
+  }
+ ]
+}

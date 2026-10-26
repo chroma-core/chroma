@@ -1,0 +1,7 @@
+{
+  "configurations": [
+    {"name": "beam128-rr10", "k": 10, "rerank": 10, "beam_min": 128, "beam_max": 128},
+    {"name": "beam512-rr10", "k": 10, "rerank": 10, "beam_min": 512, "beam_max": 512},
+    {"name": "beam1024-rr10", "k": 10, "rerank": 10, "beam_min": 1024, "beam_max": 1024}
+  ]
+}

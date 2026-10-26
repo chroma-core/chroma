@@ -960,9 +960,18 @@ async fn checkpoint_validation_reuses_successful_saves_and_detects_external_chan
     // Same-size edits must also invalidate validation, not merely truncations.
     let data_path = path.join("data_level0.bin");
     let saved = std::fs::read(&data_path).unwrap();
+    let modified = std::fs::metadata(&data_path).unwrap().modified().unwrap();
     let mut corrupt = saved.clone();
     corrupt[..4].copy_from_slice(&u32::MAX.to_ne_bytes());
     std::fs::write(&data_path, corrupt).unwrap();
+    // A same-size rewrite can share the previous timestamp on coarse-resolution
+    // filesystems. Advance it explicitly so validation inspects the corrupt bytes.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&data_path)
+        .unwrap()
+        .set_modified(modified + std::time::Duration::from_secs(1))
+        .unwrap();
     assert!(writer
         .index
         .validate_persisted_checkpoint(&path, 0)

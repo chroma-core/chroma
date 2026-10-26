@@ -1,0 +1,6 @@
+{
+  "configurations": [
+    {"name": "beam32-rr10", "k": 10, "rerank": 10, "beam_min": 32, "beam_max": 32},
+    {"name": "beam64-rr10", "k": 10, "rerank": 10, "beam_min": 64, "beam_max": 64}
+  ]
+}

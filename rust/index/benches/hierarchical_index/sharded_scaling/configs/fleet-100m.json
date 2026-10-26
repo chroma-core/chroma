@@ -1,0 +1,39 @@
+{
+ "configurations": [
+  {
+   "name": "k10-beam512-rr0",
+   "k": 10,
+   "rerank": 0,
+   "beam_min": 512,
+   "beam_max": 512
+  },
+  {
+   "name": "k10-beam512-rr10",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512
+  },
+  {
+   "name": "k10-beam2048-rr10",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 2048,
+   "beam_max": 2048
+  },
+  {
+   "name": "k100-beam1024-rr4",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024
+  },
+  {
+   "name": "k100-beam4096-rr4",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 4096,
+   "beam_max": 4096
+  }
+ ]
+}

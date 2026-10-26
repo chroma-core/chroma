@@ -1,0 +1,11 @@
+{
+  "configurations": [
+    {"name": "beam32-rr10", "k": 10, "rerank": 10, "beam_min": 32, "beam_max": 32},
+    {"name": "beam64-rr10", "k": 10, "rerank": 10, "beam_min": 64, "beam_max": 64},
+    {"name": "beam128-rr0", "k": 10, "rerank": 0, "beam_min": 128, "beam_max": 128},
+    {"name": "beam128-rr4", "k": 10, "rerank": 4, "beam_min": 128, "beam_max": 128},
+    {"name": "beam128-rr10", "k": 10, "rerank": 10, "beam_min": 128, "beam_max": 128},
+    {"name": "beam128-rr20", "k": 10, "rerank": 20, "beam_min": 128, "beam_max": 128},
+    {"name": "beam256-rr10", "k": 10, "rerank": 10, "beam_min": 256, "beam_max": 256}
+  ]
+}

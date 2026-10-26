@@ -1,0 +1,312 @@
+{
+ "configurations": [
+  {
+   "name": "k10-beam512-rr10-L2cap2",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    2
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L2cap4",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    4
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L2cap8",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    8
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L2cap16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L2cap32",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    32
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L2cap64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-beam512-rr10-L2cap109",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    109
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L2cap2",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    2
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L2cap4",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    4
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L2cap8",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    8
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L2cap16",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L2cap32",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    32
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L2cap64",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k10-beam1024-rr10-L2cap109",
+   "k": 10,
+   "rerank": 10,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    109
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L2cap2",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    2
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L2cap4",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    4
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L2cap8",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    8
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L2cap16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L2cap32",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    32
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L2cap64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-beam512-rr4-L2cap109",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 512,
+   "beam_max": 512,
+   "level_beam_max": [
+    0,
+    109
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L2cap2",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    2
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L2cap4",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    4
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L2cap8",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    8
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L2cap16",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    16
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L2cap32",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    32
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L2cap64",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    64
+   ]
+  },
+  {
+   "name": "k100-beam1024-rr4-L2cap109",
+   "k": 100,
+   "rerank": 4,
+   "beam_min": 1024,
+   "beam_max": 1024,
+   "level_beam_max": [
+    0,
+    109
+   ]
+  }
+ ]
+}

@@ -17,6 +17,9 @@ use provider::BlockfileProvider;
 use tempfile::TempDir;
 pub use types::*;
 
+// Arrow blocks returned by `BlockfileReader::fetch_block`.
+pub use arrow::block::Block;
+
 // Re-export RootManager for external use
 pub use arrow::provider::RootManager;
 

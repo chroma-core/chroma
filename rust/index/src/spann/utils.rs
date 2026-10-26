@@ -9,6 +9,158 @@ use thiserror::Error;
 
 use crate::{hnsw_provider::HnswIndexRef, quantization::Code, SearchResult};
 
+/// Cumulative work in the shared two-means split kernel. Counts include seed
+/// evaluation and convergence distances; row_iterations counts assignment rows.
+/// The general `cluster` API is separate and is not included in this profile.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct ClusteringProfileSnapshot {
+    pub calls: u64,
+    pub input_rows: u64,
+    pub iterations: u64,
+    pub row_iterations: u64,
+    pub distance_calls: u64,
+    pub initialization_attempts: u64,
+    pub elapsed_nanos: u64,
+    pub thread_cpu_nanos: u64,
+    pub thread_cpu_supported_calls: u64,
+}
+impl ClusteringProfileSnapshot {
+    pub fn delta(&self, before: &Self) -> Self {
+        Self {
+            calls: self.calls.saturating_sub(before.calls),
+            input_rows: self.input_rows.saturating_sub(before.input_rows),
+            iterations: self.iterations.saturating_sub(before.iterations),
+            row_iterations: self.row_iterations.saturating_sub(before.row_iterations),
+            distance_calls: self.distance_calls.saturating_sub(before.distance_calls),
+            initialization_attempts: self
+                .initialization_attempts
+                .saturating_sub(before.initialization_attempts),
+            elapsed_nanos: self.elapsed_nanos.saturating_sub(before.elapsed_nanos),
+            thread_cpu_nanos: self
+                .thread_cpu_nanos
+                .saturating_sub(before.thread_cpu_nanos),
+            thread_cpu_supported_calls: self
+                .thread_cpu_supported_calls
+                .saturating_sub(before.thread_cpu_supported_calls),
+        }
+    }
+}
+static CLUSTERING_PROFILE: std::sync::Mutex<ClusteringProfileSnapshot> =
+    std::sync::Mutex::new(ClusteringProfileSnapshot {
+        calls: 0,
+        input_rows: 0,
+        iterations: 0,
+        row_iterations: 0,
+        distance_calls: 0,
+        initialization_attempts: 0,
+        elapsed_nanos: 0,
+        thread_cpu_nanos: 0,
+        thread_cpu_supported_calls: 0,
+    });
+/// Take snapshots outside the measured phase after its workers have drained.
+pub fn clustering_profile_snapshot() -> ClusteringProfileSnapshot {
+    CLUSTERING_PROFILE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+/// Calling-thread CPU time. Unsupported systems report None rather than zero.
+pub fn clustering_thread_cpu_nanos() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        #[repr(C)]
+        struct Timespec {
+            seconds: std::os::raw::c_long,
+            nanos: std::os::raw::c_long,
+        }
+        unsafe extern "C" {
+            fn clock_gettime(
+                clock: std::os::raw::c_int,
+                time: *mut Timespec,
+            ) -> std::os::raw::c_int;
+        }
+        let mut time = Timespec {
+            seconds: 0,
+            nanos: 0,
+        };
+        // Linux CLOCK_THREAD_CPUTIME_ID is 3; the output remains local to this call.
+        if unsafe { clock_gettime(3, &mut time) } == 0 {
+            return u64::try_from(time.seconds)
+                .ok()?
+                .checked_mul(1_000_000_000)?
+                .checked_add(u64::try_from(time.nanos).ok()?);
+        }
+    }
+    None
+}
+#[cfg(test)]
+thread_local! {
+    static LAST_SPLIT_PROFILE: std::cell::RefCell<ClusteringProfileSnapshot> = std::cell::RefCell::new(ClusteringProfileSnapshot::default());
+}
+/// The split kernel records its work only when profiling is compiled in;
+/// production builds skip the clock reads and the shared counter.
+const SPLIT_PROFILING: bool = cfg!(any(test, feature = "clustering-profile"));
+struct SplitProfile {
+    work: ClusteringProfileSnapshot,
+    start: std::time::Instant,
+    cpu: Option<u64>,
+}
+impl SplitProfile {
+    fn new(rows: usize) -> Self {
+        Self {
+            work: ClusteringProfileSnapshot {
+                calls: 1,
+                input_rows: rows as u64,
+                ..Default::default()
+            },
+            start: std::time::Instant::now(),
+            cpu: if SPLIT_PROFILING {
+                clustering_thread_cpu_nanos()
+            } else {
+                None
+            },
+        }
+    }
+}
+impl Drop for SplitProfile {
+    fn drop(&mut self) {
+        if !SPLIT_PROFILING {
+            return;
+        }
+        self.work.elapsed_nanos = self.start.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+        if let Some(cpu) = self
+            .cpu
+            .zip(clustering_thread_cpu_nanos())
+            .map(|(a, b)| b.saturating_sub(a))
+        {
+            self.work.thread_cpu_nanos = cpu;
+            self.work.thread_cpu_supported_calls = 1;
+        }
+        #[cfg(test)]
+        LAST_SPLIT_PROFILE.with(|last| *last.borrow_mut() = self.work.clone());
+        let mut total = CLUSTERING_PROFILE.lock().unwrap_or_else(|e| e.into_inner());
+        total.calls = total.calls.saturating_add(self.work.calls);
+        total.input_rows = total.input_rows.saturating_add(self.work.input_rows);
+        total.iterations = total.iterations.saturating_add(self.work.iterations);
+        total.row_iterations = total
+            .row_iterations
+            .saturating_add(self.work.row_iterations);
+        total.distance_calls = total
+            .distance_calls
+            .saturating_add(self.work.distance_calls);
+        total.initialization_attempts = total
+            .initialization_attempts
+            .saturating_add(self.work.initialization_attempts);
+        total.elapsed_nanos = total.elapsed_nanos.saturating_add(self.work.elapsed_nanos);
+        total.thread_cpu_nanos = total
+            .thread_cpu_nanos
+            .saturating_add(self.work.thread_cpu_nanos);
+        total.thread_cpu_supported_calls = total
+            .thread_cpu_supported_calls
+            .saturating_add(self.work.thread_cpu_supported_calls);
+    }
+}
+
 /// A point with its ID, version, and embedding.
 pub type EmbeddingPoint = (u32, u32, Arc<[f32]>);
 
@@ -617,6 +769,7 @@ pub async fn rng_query(
 /// are the averages of the corresponding groups.
 pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFunction) -> SplitResult {
     let n = embeddings.len();
+    let mut profile = SplitProfile::new(n);
 
     if n < 2 {
         let c = embeddings
@@ -635,6 +788,8 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
     let mut best_total_dist = f32::MAX;
 
     for _ in 0..4 {
+        profile.work.initialization_attempts += 1;
+        profile.work.distance_calls += 2 * n as u64;
         let picked = embeddings.iter().choose_multiple(&mut rng, 2);
         let c_0 = picked[0].2.as_ref();
         let c_1 = picked[1].2.as_ref();
@@ -665,6 +820,9 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
     let mut no_improvement = 0;
 
     for _ in 0..128 {
+        profile.work.iterations += 1;
+        profile.work.row_iterations += n as u64;
+        profile.work.distance_calls += 2 * n as u64 + 1;
         // Assignment
         let mut total_dist = 0.0;
         for (i, (_, _, e)) in embeddings.iter().enumerate() {
@@ -703,6 +861,7 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         // Check convergence
         let c_0_c_1_dist = distance_function.distance(&c_0, &c_1);
         let relative_diff = if c_0_c_1_dist > f32::EPSILON {
+            profile.work.distance_calls += 2;
             (distance_function.distance(&c_0, &new_c_0)
                 + distance_function.distance(&c_1, &new_c_1))
                 / c_0_c_1_dist
@@ -1024,5 +1183,34 @@ mod tests {
             100.0,
         );
         let _ = cluster(&mut kmeans_algo).expect("Failed to cluster");
+    }
+}
+
+#[cfg(test)]
+mod split_profile_tests {
+    use super::*;
+    #[test]
+    fn split_profile_counts_real_kernel_work() {
+        let points: Vec<EmbeddingPoint> = (0..16)
+            .map(|i| (i, 0, Arc::from(vec![i as f32, (i % 3) as f32])))
+            .collect();
+        let before = clustering_profile_snapshot();
+        let (_, left, _, right) = split(points, &DistanceFunction::Euclidean);
+        // Other kernel tests may run concurrently. Exact work belongs to this
+        // call; the process-wide aggregate can also contain other callers.
+        let work = LAST_SPLIT_PROFILE.with(|last| last.borrow().clone());
+        assert!(clustering_profile_snapshot().delta(&before).calls >= 1);
+        assert_eq!(left.len() + right.len(), 16);
+        assert_eq!(work.calls, 1);
+        assert_eq!(work.input_rows, 16);
+        assert_eq!(work.initialization_attempts, 4);
+        assert!(work.iterations > 0 && work.iterations <= 128);
+        assert_eq!(work.row_iterations, 16 * work.iterations);
+        assert!(work.distance_calls >= 128 + 2 * work.row_iterations + work.iterations);
+        assert!(work.elapsed_nanos > 0);
+        assert_eq!(
+            work.thread_cpu_supported_calls,
+            u64::from(cfg!(target_os = "linux"))
+        );
     }
 }
