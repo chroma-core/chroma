@@ -9,6 +9,49 @@ Payload for hybrid search operations.
 Can be constructed by directly providing the parameters, or by using the builder pattern.
 
 
+### Local sparse search
+
+`PersistentClient` and `EphemeralClient` support a subset of Search for records with a configured sparse-vector metadata field. Records still use the existing dense-embedding admission path. Supply sparse query vectors explicitly; the native executor scores matching records as `1 - dot(query, record)`.
+
+For example, with the embedded Python client:
+
+```python
+import chromadb
+from chromadb import K, Knn, Search
+from chromadb.api.types import Schema, SparseVector, SparseVectorIndexConfig
+
+client = chromadb.EphemeralClient()
+schema = Schema()
+schema.create_index(key="sparse", config=SparseVectorIndexConfig(bm25=False))
+collection = client.create_collection(
+    "local-sparse-example", schema=schema, embedding_function=None
+)
+collection.add(
+    ids=["match", "disjoint"],
+    embeddings=[[1.0, 0.0], [0.0, 1.0]],
+    metadatas=[
+        {"sparse": SparseVector(indices=[1], values=[2.0])},
+        {"sparse": SparseVector(indices=[9], values=[1.0])},
+    ],
+)
+result = collection.search(
+    Search().rank(Knn(
+        query=SparseVector(indices=[1], values=[1.0]), key="sparse", limit=2
+    )).select(K.SCORE)
+)
+assert result["ids"] == [["match", "disjoint"]]
+assert result["scores"] == [[-1.0, 1.0]]
+```
+
+This local subset applies to embedded Python clients, not to every server deployment.
+
+Local Search supports one sparse `Knn` leaf per search, scalar metadata and ID filters, metadata/document/score selection, and `INDEX_AND_WAL`. All searches in a batch must use the same sparse field. The leaf's `limit` caps candidates before the search's offset and limit are applied. Records that contain an empty or disjoint sparse vector have score `1`; records missing the field are excluded. Equal scores use internal record order.
+
+BM25/IDF weighting, hybrid rank expressions, rank defaults, `return_rank=True`, grouping, dense Search ranking, embedding selection, document/array filters, and other read levels are not supported locally. Continue using `query()` for local dense nearest-neighbor queries.
+
+This implementation scans filtered sparse values in SQLite, rather than using an inverted index. Query work grows with the filtered data, and the read transaction spans ranking and projection. Sparse weights and accumulated scores must be finite. Each request reads scores and projections from one SQLite snapshot after normal local backfill; it does not provide a transaction spanning separate client calls.
+
+
 <span class="text-sm">Methods</span>
 
 `__init__()`, `group_by()`, `limit()`, `rank()`, `select()`, `select_all()`, `to_dict()`, `where()`

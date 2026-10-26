@@ -1268,6 +1268,35 @@ impl Bindings {
         })
     }
 
+    #[pyo3(signature = (collection_id, payload_json, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string()))]
+    fn search(
+        &self,
+        py: Python<'_>,
+        collection_id: String,
+        payload_json: String,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<String> {
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+        let payload: chroma_types::SearchRequestPayload =
+            serde_json::from_str(&payload_json).map_err(WrappedSerdeJsonError::SerdeJsonError)?;
+        let request = chroma_types::SearchRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            payload.searches,
+            payload.read_level,
+        )?;
+        let mut frontend = self.frontend.clone();
+        let response = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.search(request).await })
+        })?;
+        Ok(serde_json::to_string(&response).map_err(WrappedSerdeJsonError::SerdeJsonError)?)
+    }
+
     #[pyo3(
         signature = (collection_id, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
