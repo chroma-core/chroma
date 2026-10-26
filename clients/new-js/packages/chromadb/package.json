@@ -35,7 +35,7 @@
     "test:functional": "jest --runInBand --testPathIgnorePatterns=test/auth.*.test.ts",
     "test:update": "jest --runInBand --updateSnapshot",
     "prebuild": "rimraf dist",
-    "build": "tsup",
+    "build": "node init && tsup",
     "watch": "tsup --watch",
     "genapi": "node --loader ts-node/esm scripts/gen-api.ts",
     "prettier": "prettier --write .",

@@ -76,3 +76,91 @@ def test_sparse_metadata_public_roundtrip(tmp_path: Path) -> None:
         assert final[0] is None or "sparse" not in final[0]
     finally:
         cast(Client, client)._system.stop()
+
+
+def test_metadata_response_is_read_once(tmp_path: Path, monkeypatch: Any) -> None:
+    client = cast(
+        Client,
+        chromadb.PersistentClient(
+            path=str(tmp_path),
+            settings=Settings(_env_file=None, anonymized_telemetry=False),  # type: ignore[call-arg]
+        ),
+    )
+    try:
+        schema = Schema().create_index(
+            key="sparse", config=SparseVectorIndexConfig(bm25=False)
+        )
+        collection = client.create_collection(
+            "metadata-read-once", schema=schema, embedding_function=None
+        )
+        vector = SparseVector(indices=[1], values=[2.0], labels=["token"])
+        empty = SparseVector(indices=[], values=[], labels=[])
+        collection.add(
+            ids=["a", "b"],
+            embeddings=[[1.0, 0.0], [0.0, 1.0]],
+            metadatas=[
+                {"sparse": vector, "scalar": True, "array": [1, 2]},
+                {"sparse": empty},
+            ],
+        )
+        collection.add(ids=["c"], embeddings=[[0.5, 0.5]])
+        bindings = cast(Any, client._server).bindings
+
+        class ResponseReads:
+            def __init__(self, response: Any) -> None:
+                self.response = response
+                self.count = 0
+
+            @property
+            def metadatas(self) -> Any:
+                self.count += 1
+                return self.response.metadatas
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self.response, name)
+
+        reads: list[ResponseReads] = []
+
+        class ObserveBindings:
+            def get(self, *args: Any, **kwargs: Any) -> Any:
+                response = ResponseReads(bindings.get(*args, **kwargs))
+                reads.append(response)
+                return response
+
+            def query(self, *args: Any, **kwargs: Any) -> Any:
+                response = ResponseReads(bindings.query(*args, **kwargs))
+                reads.append(response)
+                return response
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(bindings, name)
+
+        monkeypatch.setattr(client._server, "bindings", ObserveBindings())
+        result = collection.get(include=["metadatas"])
+        assert reads[-1].count == 1
+        assert result["metadatas"] is not None
+        by_id = dict(zip(result["ids"], result["metadatas"]))
+        assert by_id["a"] == {"sparse": vector, "scalar": True, "array": [1, 2]}
+        assert by_id["b"] == {"sparse": empty}
+        assert by_id["c"] is None
+        query = collection.query(
+            query_embeddings=[[1.0, 0.0], [0.0, 1.0]],
+            n_results=3,
+            include=["metadatas"],
+        )
+        assert reads[-1].count == 1
+        assert query["metadatas"] is not None
+        for ids, metadatas in zip(query["ids"], query["metadatas"]):
+            assert dict(zip(ids, metadatas)) == by_id
+        assert collection.get(include=[])["metadatas"] is None
+        assert reads[-1].count == 1
+        assert (
+            collection.query(query_embeddings=[[1.0, 0.0]], include=[])["metadatas"]
+            is None
+        )
+        assert reads[-1].count == 1
+        empty_result = collection.get(ids=["missing"], include=["metadatas"])
+        assert empty_result["ids"] == [] and empty_result["metadatas"] == []
+        assert reads[-1].count == 1
+    finally:
+        client._system.stop()

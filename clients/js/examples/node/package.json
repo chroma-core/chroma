@@ -5,10 +5,10 @@
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "node app.js",
-    "start": "node app.js",
-    "dev:bundled": "node app-bundled.js",
-    "dev:client": "node app-client.js",
+    "dev": "node init && node app.js",
+    "start": "node init && node app.js",
+    "dev:bundled": "node init && node app-bundled.js",
+    "dev:client": "node init && node app-client.js",
     "rebuild": "cd ../.. && pnpm build && cd examples/node && rm -rf node_modules && pnpm install && pnpm dev"
   },
   "author": "",
