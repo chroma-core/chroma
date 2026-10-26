@@ -75,6 +75,7 @@ use wal3::{
     FRAGMENT_UPLOAD_FAULT_LABEL,
 };
 
+mod cursor_refresh;
 mod scrub;
 pub mod state_hash_table;
 
@@ -1148,6 +1149,14 @@ fn cache_key_for_cursor(collection_id: CollectionUuid, name: &CursorName) -> Str
     format!("{collection_id}::cursor::{}", name.path())
 }
 
+/// Key for the timestamped storage verification used by compaction backpressure.
+fn cache_key_for_verified_cursor(collection_id: CollectionUuid) -> String {
+    format!(
+        "{}:verified",
+        cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR)
+    )
+}
+
 fn cache_key_for_fragment(collection_id: CollectionUuid, fragment_path: &str) -> String {
     format!("{collection_id}::{}", fragment_path)
 }
@@ -1645,12 +1654,8 @@ impl LogServer {
             Arc::clone(&backpressure)
         };
         if backpressure.contains(&collection_id) {
-            if let Some(cache) = self.cache.as_ref() {
-                // When backpressure is detected, the cached intrinsic cursor may be stale.
-                // Evict it to force a read from storage on the next operation, ensuring
-                // the system can recover from the backpressure state.
-                let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
-                cache.remove(&cache_key).await;
+            if !self.revalidate_backpressure(collection_id).await? {
+                return Ok(());
             }
             return Err(status_with_backoff_reason(
                 tonic::Code::ResourceExhausted,
@@ -1799,6 +1804,9 @@ impl LogServer {
         };
         if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+            cache
+                .remove(&cache_key_for_verified_cursor(collection_id))
+                .await;
             match serde_json::to_string(&witness) {
                 Ok(json_witness) => {
                     let value = CachedBytes::new(Vec::from(json_witness));
@@ -2144,11 +2152,14 @@ impl LogServer {
     > {
         let mut markers = vec![];
         let mut backpressure = vec![];
-        for ((_, collection_id), rollup) in rollup.rollups.iter() {
+        let before = rollup.rollups;
+        let mut after = before.clone();
+        for ((_, collection_id), rollup) in after.iter_mut() {
             if rollup.is_empty() {
                 continue;
             }
             let marker = rollup.dirty_marker(*collection_id);
+            rollup.reinsert_count = rollup.reinsert_count.saturating_add(1);
             markers.push(serde_json::to_string(&marker).map(Vec::from)?);
             if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
                 backpressure.push(*collection_id);
@@ -2176,14 +2187,12 @@ impl LogServer {
         } else {
             cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
-        let after = rollup.rollups.clone();
         // NOTE(rescrv):  This is protection against a collection hopping from one log to another
         // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
         // cursor, which will, on the next dirty log rollup, update the lower bound on the cursor,
         // restoring order to the dirty log.
         if let Some(cache) = self.cache.as_ref() {
             let mut cache_collections_to_purge = Vec::with_capacity(after.len());
-            let before = rollup.rollups;
             let reinsert_threshold = self.config.reinsert_threshold;
             for (key, after_state) in after.iter() {
                 let Some(before_state) = before.get(key) else {
@@ -2350,7 +2359,8 @@ impl LogServer {
         let load_witness = |_this: &LogServer,
                             storage: Arc<Storage>,
                             topology: Option<TopologyName>,
-                            collection_id: CollectionUuid| {
+                            collection_id: CollectionUuid,
+                            refresh: bool| {
             let semaphore = Arc::clone(&semaphore);
             async move {
                 let cursor = &INTRINSIC_CURSOR;
@@ -2365,18 +2375,29 @@ impl LogServer {
                     let handle = self.open_logs.get_or_create_state(key);
                     let mut _active = handle.active.lock().await;
                     let cache_key = cache_key_for_cursor(collection_id, cursor);
-                    if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
-                        let witness: CursorWitness = serde_json::from_slice(&json_witness.bytes)?;
-                        return Ok((Some(witness), None));
+                    if !refresh {
+                        if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
+                            let witness: CursorWitness =
+                                serde_json::from_slice(&json_witness.bytes)?;
+                            return Ok((Some(witness), None));
+                        }
                     }
+                    let _permit = semaphore.acquire().await;
                     let res = cursor_store.load(cursor).await?;
+                    if refresh {
+                        tracing::debug!(%collection_id, position = ?res.as_ref().map(|w| w.cursor.position),
+                            "refreshed compaction cursor during dirty log rollup");
+                    }
                     if let Some(witness) = res.as_ref() {
                         let json_witness = serde_json::to_string(&witness)?;
                         let value = CachedBytes::new(Vec::from(json_witness));
                         cache.insert(cache_key, value).await;
+                    } else {
+                        cache.remove(&cache_key).await;
                     }
                     res
                 } else {
+                    let _permit = semaphore.acquire().await;
                     let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
                     cursor_store.load(cursor).instrument(span).await?
                 };
@@ -2405,14 +2426,27 @@ impl LogServer {
         for (key, mut rollup) in std::mem::take(rollups) {
             let storage_for_task = Arc::clone(&preferred_storage);
             futures.push(async move {
-                let (witness, manifest) =
-                    match load_witness(self, storage_for_task, key.0.clone(), key.1).await {
-                        Ok(witness) => witness,
-                        Err(err) => {
-                            tracing::warn!("could not load cursor: {err}");
-                            return Some((key, rollup));
-                        }
-                    };
+                let (witness, manifest) = match load_witness(
+                    self,
+                    storage_for_task,
+                    key.0.clone(),
+                    key.1,
+                    rollup.requires_backpressure(self.config.num_records_before_backpressure)
+                        || rollup.reinsert_count
+                            % self
+                                .config
+                                .compaction_cursor_refresh_interval_rollups
+                                .max(1)
+                            == 0,
+                )
+                .await
+                {
+                    Ok(witness) => witness,
+                    Err(err) => {
+                        tracing::warn!("could not load cursor: {err}");
+                        return Some((key, rollup));
+                    }
+                };
                 // NOTE(rescrv):  There are two spreads that we have.
                 // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
                 // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
@@ -3721,7 +3755,13 @@ impl LogServer {
                 let collection_id = Uuid::parse_str(&x)
                     .map(CollectionUuid)
                     .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-                Some(cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR))
+                let key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+                if let Some(cache) = &self.cache {
+                    cache
+                        .remove(&cache_key_for_verified_cursor(collection_id))
+                        .await;
+                }
+                Some(key)
             }
             Some(EntryToEvict::ManifestForCollectionId(x)) => {
                 let collection_id = Uuid::parse_str(&x)
@@ -4118,6 +4158,10 @@ pub struct LogServerConfig {
     pub num_records_before_backpressure: u64,
     #[serde(default = "LogServerConfig::default_reinsert_threshold")]
     pub reinsert_threshold: u64,
+    /// Refresh cached compaction positions independently of small-batch scheduling.
+    /// Zero refreshes every rollup; the default six rollups are about one minute.
+    #[serde(default = "LogServerConfig::default_compaction_cursor_refresh_interval_rollups")]
+    pub compaction_cursor_refresh_interval_rollups: u64,
     #[serde(default = "LogServerConfig::default_suggested_compaction_threshold")]
     pub suggested_compaction_threshold: u64,
     #[serde(default = "LogServerConfig::default_rollup_interval")]
@@ -4198,7 +4242,11 @@ impl LogServerConfig {
         1_000_000
     }
 
-    /// force compaction if a candidate comes up ten times.
+    fn default_compaction_cursor_refresh_interval_rollups() -> u64 {
+        6
+    }
+
+    /// Force compaction if a candidate comes up ten times.
     fn default_reinsert_threshold() -> u64 {
         10
     }
@@ -4269,6 +4317,8 @@ impl Default for LogServerConfig {
             record_count_threshold: Self::default_record_count_threshold(),
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
+            compaction_cursor_refresh_interval_rollups:
+                Self::default_compaction_cursor_refresh_interval_rollups(),
             suggested_compaction_threshold: Self::default_suggested_compaction_threshold(),
             rollup_interval: Self::default_rollup_interval(),
             timeout_us: Self::default_timeout_us(),
@@ -4446,6 +4496,8 @@ pub async fn log_entrypoint() {
 
 #[cfg(test)]
 mod tests {
+    mod cursor_refresh;
+
     use std::future::Future;
     use std::pin::Pin;
     use std::{str::FromStr, sync::Arc};
