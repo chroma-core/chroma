@@ -479,6 +479,7 @@ class RustBindingsAPI(ServerAPI):
             database,
         )
 
+        metadatas = rust_response.metadatas
         return GetResult(
             ids=rust_response.ids,
             embeddings=rust_response.embeddings,
@@ -488,12 +489,9 @@ class RustBindingsAPI(ServerAPI):
             data=None,
             metadatas=cast(
                 Metadatas,
-                [
-                    deserialize_metadata(metadata)
-                    for metadata in rust_response.metadatas
-                ],
+                [deserialize_metadata(metadata) for metadata in metadatas],
             )
-            if rust_response.metadatas is not None
+            if metadatas is not None
             else None,
         )
 
@@ -635,6 +633,7 @@ class RustBindingsAPI(ServerAPI):
             database,
         )
 
+        metadatas = rust_response.metadatas
         return QueryResult(
             ids=rust_response.ids,
             embeddings=rust_response.embeddings,
@@ -648,10 +647,10 @@ class RustBindingsAPI(ServerAPI):
                     [deserialize_metadata(metadata) for metadata in batch]
                     if batch is not None
                     else None
-                    for batch in rust_response.metadatas
+                    for batch in metadatas
                 ],
             )
-            if rust_response.metadatas is not None
+            if metadatas is not None
             else None,
             distances=rust_response.distances,
         )
