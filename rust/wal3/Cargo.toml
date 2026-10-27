@@ -11,7 +11,9 @@ futures = { workspace = true }
 google-cloud-spanner = { workspace = true }
 google-cloud-gax = { workspace = true }
 opentelemetry = { workspace = true }
-parquet = { workspace = true }
+# WAL fragments use Snappy. Avoid Parquet 55's optional zstd 0.13 dependency
+# in standalone WAL consumers without changing other workspace users' codecs.
+parquet = { version = "55.1", default-features = false, features = ["async", "arrow", "snap", "brotli", "flate2", "lz4", "base64", "simdutf8"] }
 prost-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

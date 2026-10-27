@@ -29,6 +29,8 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - name: Check standalone storage and WAL dependencies
+        run: python3 rust/wal3/tests/check_standalone_dependencies.py
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Test
