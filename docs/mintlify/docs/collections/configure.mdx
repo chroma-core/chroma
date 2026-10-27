@@ -248,16 +248,16 @@ Creating collections with embedding function and custom configuration:
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 import { CohereEmbeddingFunction } from "@chroma-core/cohere";
 
-// Using the `embedding_function` argument
+// Using the `embeddingFunction` argument
 const openAICollection = await client.createCollection({
   name: "my_openai_collection",
-  embedding_function: new OpenAIEmbeddingFunction({
-    model_name: "text-embedding-3-small",
+  embeddingFunction: new OpenAIEmbeddingFunction({
+    modelName: "text-embedding-3-small",
   }),
   configuration: { hnsw: { space: "cosine" } },
 });
 
-// Setting `embedding_function` in the collection's `configuration`
+// Setting `embeddingFunction` in the collection's `configuration`
 const cohereCollection = await client.getOrCreateCollection({
   name: "my_cohere_collection",
   configuration: {
@@ -270,12 +270,12 @@ const cohereCollection = await client.getOrCreateCollection({
 });
 ```
 
-**Note:** Many embedding functions require API keys to interface with the third party embeddings providers. The Chroma embedding functions will automatically look for the standard environment variable used to store a provider's API key. For example, the Chroma `OpenAIEmbeddingFunction` will set its `api_key` argument to the value of the `OPENAI_API_KEY` environment variable if it is set.
+**Note:** Many embedding functions require API keys to interface with the third party embeddings providers. The Chroma embedding functions will automatically look for the standard environment variable used to store a provider's API key. For example, the Chroma `OpenAIEmbeddingFunction` will set its `apiKey` argument to the value of the `OPENAI_API_KEY` environment variable if it is set.
 
 If your API key is stored in an environment variable with a non-standard name, you can configure your embedding function to use your custom environment variable by setting the `apiKeyEnvVar` argument. In order for the embedding function to operate correctly, you will have to set this variable in every environment where you use your collection.
 
 ```typescript
-cohere_ef = CohereEmbeddingFunction({
+const cohereEF = new CohereEmbeddingFunction({
   apiKeyEnvVar: "MY_CUSTOM_COHERE_API_KEY",
   modelName: "embed-english-light-v2.0",
   truncate: "NONE",
