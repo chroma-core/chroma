@@ -8,8 +8,10 @@ anyhow = "1.0"
 arrow = "55.1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "1.5", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.63"
+# Use the modern HTTPS connector without implicitly enabling the legacy
+# connector or SigV4a's vulnerable crypto-bigint 0.5 dependency.
+aws-config = { version = "1.8.15", default-features = false, features = ["behavior-version-latest", "default-https-client", "rt-tokio", "credentials-process", "sso"] }
+aws-sdk-s3 = { version = "1.119", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-smithy-types = "1.2"
 axum = { version = "0.8", features = ["macros"] }
 bytes = "1.10"

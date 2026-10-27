@@ -8,6 +8,29 @@ other sources of locking or coordination.
 
 This log is designed to provide high throughput with a single writer and multiple readers, but it will remain correct and available even if multiple writers are present. Mostly this is intended to recover from a crashed or underperforming writer without risking the correctness of the log. 
 
+# Standalone dependency features
+
+WAL fragments keep their existing Snappy-compressed Parquet format. Standalone
+`wal3` consumers enable Arrow, asynchronous reading, and the Parquet codecs other
+than zstd. Parquet 55's optional zstd dependency is affected by
+[RUSTSEC-2026-0391](https://rustsec.org/advisories/RUSTSEC-2026-0391.html),
+[RUSTSEC-2026-0398](https://rustsec.org/advisories/RUSTSEC-2026-0398.html), and
+[RUSTSEC-2026-0403](https://rustsec.org/advisories/RUSTSEC-2026-0403.html).
+Other Chroma workspace components retain their existing Parquet codec features;
+Cargo can unify those features when they are built together.
+
+S3 storage uses regional SigV4 signing and the modern HTTPS connector. Optional
+SigV4a signing is disabled while the AWS signer depends on an affected
+`crypto-bigint` release ([RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)).
+S3 Multi-Region Access Points that require SigV4a are unsupported by this profile.
+SSO and credential-process providers remain enabled.
+
+Check independently resolved storage and WAL consumers with:
+
+```sh
+python3 rust/wal3/tests/check_standalone_dependencies.py
+```
+
 # Design
 
 wal3 is designed to work on object storage.  It is intended to to be lightweight, to allow a single
