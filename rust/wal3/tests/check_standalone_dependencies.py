@@ -26,9 +26,13 @@ def check_graph(graph, profile):
         if name == "aws-sdk-s3" and "default-https-client" not in features:
             errors.append("S3's modern HTTPS connector is missing")
         if name == "aws-config" and not {
-            "sso", "credentials-process", "default-https-client"
+            "sso",
+            "credentials-process",
+            "default-https-client",
         }.issubset(features):
-            errors.append("AWS credential providers or modern HTTPS connector are missing")
+            errors.append(
+                "AWS credential providers or modern HTTPS connector are missing"
+            )
         if name == "parquet" and profile == "wal3":
             if "zstd" in features:
                 errors.append("standalone WAL enables Parquet's optional zstd codec")
@@ -61,22 +65,33 @@ def main():
     profiles = ["storage", "wal3"] if args.profile == "all" else [args.profile]
     for profile in profiles:
         package = "chroma-storage" if profile == "storage" else "wal3"
-        with tempfile.TemporaryDirectory(prefix="chroma-dependency-consumer-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="chroma-dependency-consumer-"
+        ) as directory:
             consumer = pathlib.Path(directory)
             (consumer / "src").mkdir()
             (consumer / "src/lib.rs").write_text("")
             dependency = json.dumps(str(args.root.resolve() / "rust" / profile))
             (consumer / "Cargo.toml").write_text(
                 '[package]\nname="dependency-consumer"\nversion="0.0.0"\nedition="2021"\n'
-                '[workspace]\n[dependencies]\n'
-                + package + "={path=" + dependency + "}\n"
+                "[workspace]\n[dependencies]\n"
+                + package
+                + "={path="
+                + dependency
+                + "}\n"
             )
             result = subprocess.run(
                 ["cargo", "metadata", "--format-version", "1"],
-                cwd=consumer, check=True, capture_output=True, text=True,
+                cwd=consumer,
+                check=True,
+                capture_output=True,
+                text=True,
             )
             check_graph(json.loads(result.stdout), profile)
-        print(f"{profile}: regional S3, modern HTTPS, and expected codecs verified", flush=True)
+        print(
+            f"{profile}: regional S3, modern HTTPS, and expected codecs verified",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":
