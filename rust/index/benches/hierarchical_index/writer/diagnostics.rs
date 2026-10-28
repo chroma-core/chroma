@@ -36,13 +36,17 @@ impl HierarchicalSpannWriter {
         gt_100: &HashSet<u32>,
         policy: &ReadBeamPolicy,
     ) -> Vec<LevelRecall> {
+        // A diagnostic checks many ground-truth IDs. Fetch their authoritative
+        // versions together so a reopened writer does not perform one scalar
+        // blockfile read per ID during recall evaluation.
+        self.prefetch_versions_sync(&gt_100.iter().copied().collect::<Vec<_>>());
         let root = self.root_id();
 
         if let Some(root_ref) = self.nodes.get(&root) {
             if matches!(root_ref.value(), TreeNode::Leaf(_)) {
                 drop(root_ref);
                 let mut reachable = HashSet::new();
-                self.collect_all_data_ids(root, &mut reachable);
+                self.collect_ground_truth_ids(root, gt_100, &mut reachable);
                 let r100 =
                     gt_100.intersection(&reachable).count() as f64 / gt_100.len().max(1) as f64;
                 return vec![LevelRecall {
@@ -106,7 +110,7 @@ impl HierarchicalSpannWriter {
 
             let mut reachable: HashSet<u32> = HashSet::new();
             for &(node_id, _) in &child_scores {
-                self.collect_all_data_ids(node_id, &mut reachable);
+                self.collect_ground_truth_ids(node_id, gt_100, &mut reachable);
             }
 
             let r100 = gt_100.intersection(&reachable).count() as f64 / gt_100.len().max(1) as f64;
@@ -201,6 +205,7 @@ impl HierarchicalSpannWriter {
         if m == 0 || gt_100.is_empty() {
             return 0.0;
         }
+        self.prefetch_versions_sync(&gt_100.iter().copied().collect::<Vec<_>>());
 
         // For each leaf, find which GT vectors it contains.
         let mut leaf_covers: Vec<(NodeId, HashSet<u32>)> = Vec::new();
@@ -499,13 +504,24 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    pub(super) fn collect_all_data_ids(&self, node_id: NodeId, ids: &mut HashSet<u32>) {
+    /// Record only valid ground-truth postings under this subtree. The recall
+    /// calculation never uses other IDs, so resolving their checkpoint versions
+    /// would turn each diagnostic query into a full metadata scan.
+    fn collect_ground_truth_ids(
+        &self,
+        node_id: NodeId,
+        ground_truth: &HashSet<u32>,
+        ids: &mut HashSet<u32>,
+    ) {
         let Some(node_ref) = self.nodes.get(&node_id) else {
             return;
         };
         match node_ref.value() {
             TreeNode::Leaf(leaf) => {
                 for (i, &id) in leaf.ids.iter().enumerate() {
+                    if !ground_truth.contains(&id) {
+                        continue;
+                    }
                     let version = leaf.versions[i];
                     let current_ver = self.current_version_sync(id).unwrap_or(0);
                     if version == current_ver {
@@ -517,7 +533,7 @@ impl HierarchicalSpannWriter {
                 let children: Vec<NodeId> = internal.children.clone();
                 drop(node_ref);
                 for child_id in children {
-                    self.collect_all_data_ids(child_id, ids);
+                    self.collect_ground_truth_ids(child_id, ground_truth, ids);
                 }
             }
         }

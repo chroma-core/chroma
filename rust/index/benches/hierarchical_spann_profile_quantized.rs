@@ -1812,8 +1812,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let sampled_query_vectors: Vec<Vec<f32>>;
     let effective_query_vectors = if sample_queries_as_gt {
         use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
-        let sample_count = 100.min(all_indexed_vectors.len());
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0x7810);
+        let sample_count = args.num_queries.min(all_indexed_vectors.len());
         let mut indices: Vec<usize> = (0..all_indexed_vectors.len()).collect();
         indices.shuffle(&mut rng);
         sampled_query_vectors = indices[..sample_count]
