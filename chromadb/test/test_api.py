@@ -410,6 +410,47 @@ def test_get_nearest_neighbors(client):
             assert nn[key] is None
 
 
+def test_include_not_mutated_by_query(client):
+    """Regression test for #5857: include list must not be mutated in-place."""
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+
+    my_include = ["embeddings", "documents", "metadatas", "distances"]
+    original = list(my_include)
+
+    collection.query(
+        query_embeddings=[1.1, 2.3, 3.2],
+        n_results=1,
+        include=my_include,
+    )
+    assert my_include == original, "include list was mutated in-place"
+
+    # Second call should still work with the unmutated list
+    collection.query(
+        query_embeddings=[1.1, 2.3, 3.2],
+        n_results=1,
+        include=my_include,
+    )
+    assert my_include == original, "include list was mutated in-place on second call"
+
+
+def test_include_not_mutated_by_get(client):
+    """Regression test for #5857: include list must not be mutated in-place by get()."""
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+
+    my_include = ["embeddings", "documents", "metadatas"]
+    original = list(my_include)
+
+    collection.get(include=my_include)
+    assert my_include == original, "include list was mutated in-place by get()"
+
+    collection.get(include=my_include)
+    assert my_include == original, "include list was mutated in-place on second get()"
+
+
 def test_delete(client):
     client.reset()
     collection = client.create_collection("testspace")
