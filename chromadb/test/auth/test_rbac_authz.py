@@ -23,6 +23,9 @@ def test_delete_database_requires_rbac_permission(
 def test_pre_flight_checks_requires_auth(
     api_with_authn_rbac_authz: ServerAPI,
 ) -> None:
-    response = httpx.get(f"{api_with_authn_rbac_authz.get_api_url()}/pre-flight-checks")
+    base_url = api_with_authn_rbac_authz.get_api_url().rsplit("/api/", 1)[0]
 
-    assert response.status_code == 403
+    for api_version in ("v1", "v2"):
+        response = httpx.get(f"{base_url}/api/{api_version}/pre-flight-checks")
+
+        assert response.status_code == 403
