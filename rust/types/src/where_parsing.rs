@@ -122,6 +122,11 @@ fn parse_where_document_with_depth(
         let children = value
             .as_array()
             .ok_or(WhereValidationError::WhereDocumentClause)?;
+        // An empty composite is ambiguous (always true/false) and every other
+        // client rejects it, so reject it here as well.
+        if children.is_empty() {
+            return Err(WhereValidationError::WhereDocumentClause);
+        }
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -138,6 +143,11 @@ fn parse_where_document_with_depth(
         let children = value
             .as_array()
             .ok_or(WhereValidationError::WhereDocumentClause)?;
+        // An empty composite is ambiguous (always true/false) and every other
+        // client rejects it, so reject it here as well.
+        if children.is_empty() {
+            return Err(WhereValidationError::WhereDocumentClause);
+        }
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -204,6 +214,11 @@ fn parse_where_with_depth(
         let logical_operator = crate::BooleanOperator::And;
         // Check that the value is list type.
         let children = value.as_array().ok_or(WhereValidationError::WhereClause)?;
+        // An empty composite is ambiguous (always true/false) and every other
+        // client rejects it, so reject it here as well.
+        if children.is_empty() {
+            return Err(WhereValidationError::WhereClause);
+        }
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -218,6 +233,11 @@ fn parse_where_with_depth(
         let logical_operator = crate::BooleanOperator::Or;
         // Check that the value is list type.
         let children = value.as_array().ok_or(WhereValidationError::WhereClause)?;
+        // An empty composite is ambiguous (always true/false) and every other
+        // client rejects it, so reject it here as well.
+        if children.is_empty() {
+            return Err(WhereValidationError::WhereClause);
+        }
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -989,4 +1009,23 @@ mod tests {
             Err(WhereValidationError::WhereDocumentClause)
         ));
     }
+
+    #[test]
+    fn test_parse_where_rejects_empty_composites() {
+        for payload in [
+            json!({"$and": []}),
+            json!({"$or": []}),
+            json!({"$and": [{"$or": []}]}),
+        ] {
+            assert!(
+                parse_where(&payload).is_err(),
+                "parse_where should reject an empty composite, got {payload:?}"
+            );
+            assert!(
+                parse_where_document(&payload).is_err(),
+                "parse_where_document should reject an empty composite, got {payload:?}"
+            );
+        }
+    }
+
 }
