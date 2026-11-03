@@ -256,12 +256,19 @@ def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction:  
 
     name = config["name"]
     if name not in known_embedding_functions:
-        raise ValueError(f"Unsupported embedding function: {name}")
+        available = ", ".join(sorted(known_embedding_functions.keys()))
+        raise ValueError(
+            f"Unsupported embedding function: {name}. "
+            f"Available embedding functions are: {available}"
+        )
 
     ef_config = config.get("config", {})
 
     if known_embedding_functions[name] is None:
-        raise ValueError(f"Unsupported embedding function: {name}")
+        raise ValueError(
+            f"Embedding function {name} is registered but not available. "
+            "This usually means its optional dependencies are not installed."
+        )
 
     validate_embedding_function_config_is_safe(name, ef_config)
     return known_embedding_functions[name].build_from_config(ef_config)
