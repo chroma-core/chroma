@@ -325,6 +325,8 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         # Validate
+        if filter_ids is not None:
+            validate_ids(ids=filter_ids)
         validate_base_record_set(record_set=query_records)
         validate_filter_set(filter_set=filters)
         validate_include(include=include)

@@ -1,6 +1,7 @@
 import pytest
 from typing import List, cast, Dict, Any
 from chromadb.api.types import Documents, Image, Document, Embeddings
+from chromadb.errors import DuplicateIDError
 from chromadb.utils.embedding_functions import (
     EmbeddingFunction,
     register_embedding_function,
@@ -103,3 +104,59 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+def _collection_for_validation_tests():
+    """Build a CollectionCommon without a live client, for validation-only tests."""
+    from uuid import uuid4
+
+    from chromadb.api.models.CollectionCommon import CollectionCommon
+    from chromadb.types import Collection as CollectionModel
+
+    collection_model = CollectionModel(
+        id=uuid4(),
+        name="validation_test_collection",
+        configuration_json={},
+        serialized_schema=None,
+        metadata=None,
+        dimension=4,
+        tenant="tenant",
+        database="database",
+        version=0,
+        log_position=0,
+    )
+    return CollectionCommon(
+        client=cast(Any, object()),
+        model=collection_model,
+        embedding_function=None,
+    )
+
+
+def _query_with_ids(collection, ids):
+    return collection._validate_and_prepare_query_request(
+        query_embeddings=[np.array([1.0, 2.0, 3.0, 4.0])],
+        query_texts=None,
+        query_images=None,
+        query_uris=None,
+        ids=ids,
+        n_results=1,
+        where=None,
+        where_document=None,
+        include=["documents"],
+    )
+
+
+def test_query_ids_are_validated() -> None:
+    """query() must validate its ids filter the same way get() and delete() do."""
+    collection = _collection_for_validation_tests()
+
+    # Valid ids pass through untouched
+    request = _query_with_ids(collection, ids=["a", "b"])
+    assert request["ids"] == ["a", "b"]
+
+    # Non-string ids must be rejected client-side, not forwarded to the server
+    with pytest.raises(ValueError, match="Expected ID to be a str"):
+        _query_with_ids(collection, ids=[123])
+
+    # Duplicate ids must be rejected, like get() and delete() do
+    with pytest.raises(DuplicateIDError, match="Expected IDs to be unique"):
+        _query_with_ids(collection, ids=["a", "a"])
