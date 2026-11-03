@@ -32,6 +32,8 @@ from chromadb.api.types import (
     IncludeMetadataDocumentsDistances,
     DefaultEmbeddingFunction,
     DeleteResult,
+    validate_collection_metadata,
+    validate_collection_name,
 )
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
@@ -194,6 +196,8 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
+        validate_collection_name(name)
+        validate_collection_metadata(metadata)
         """Create a collection with optional configuration and metadata.
 
         If using a schema, do not provide `embedding_function`. Instead,
@@ -253,6 +257,7 @@ class Client(SharedSystemClient, ClientAPI):
         ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
+        validate_collection_name(name)
         """Get a collection by name.
 
         Args:
@@ -336,6 +341,8 @@ class Client(SharedSystemClient, ClientAPI):
         ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
+        validate_collection_name(name)
+        validate_collection_metadata(metadata)
         """Get an existing collection or create a new one.
 
         If the collection does not exist, it will be created. If the collection
@@ -397,6 +404,9 @@ class Client(SharedSystemClient, ClientAPI):
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
+        if new_name is not None:
+            validate_collection_name(new_name)
+        validate_collection_metadata(new_metadata)
         return self._server._modify(
             id=id,
             tenant=self.tenant,
@@ -411,6 +421,7 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         name: str,
     ) -> None:
+        validate_collection_name(name)
         return self._server.delete_collection(
             name=name,
             tenant=self.tenant,

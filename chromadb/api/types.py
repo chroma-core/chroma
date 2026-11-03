@@ -1174,6 +1174,40 @@ def deserialize_metadata(
     return result
 
 
+def validate_collection_name(name: str) -> str:
+    """Validates that a collection name is a str before it reaches the ServerAPI."""
+    if not isinstance(name, str):
+        raise ValueError(
+            f"Expected collection name to be a str, got {type(name).__name__}"
+        )
+    return name
+
+
+def validate_collection_metadata(
+    metadata: Optional[CollectionMetadata],
+) -> Optional[CollectionMetadata]:
+    """Validates collection-level metadata (scalar values only) before it
+    reaches the ServerAPI, where non-scalar values crash the embedded
+    runtime instead of raising a clear validation error."""
+    if metadata is None:
+        return metadata
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            f"Expected collection metadata to be a dict or None, got {type(metadata).__name__}"
+        )
+    for key, value in metadata.items():
+        if not isinstance(key, str):
+            raise TypeError(
+                f"Expected collection metadata key to be a str, got {key} which is a {type(key).__name__}"
+            )
+        if not isinstance(value, (str, int, float, bool, type(None))):
+            raise ValueError(
+                f"Expected collection metadata value for key '{key}' to be a str, int, float, bool, or None, "
+                f"got {value!r} which is a {type(value).__name__}"
+            )
+    return metadata
+
+
 def validate_metadatas(metadatas: Metadatas) -> Metadatas:
     """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, floats or bools"""
     if not isinstance(metadatas, list):

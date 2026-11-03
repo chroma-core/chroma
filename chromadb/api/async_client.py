@@ -34,6 +34,8 @@ from chromadb.api.types import (
     URIs,
     DefaultEmbeddingFunction,
     DeleteResult,
+    validate_collection_metadata,
+    validate_collection_name,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
@@ -196,6 +198,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> AsyncCollection:
+        validate_collection_name(name)
+        validate_collection_metadata(metadata)
         if configuration is None:
             configuration = {}
 
@@ -235,6 +239,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
+        validate_collection_name(name)
         model = await self._server.get_collection(
             name=name,
             tenant=self.tenant,
@@ -305,6 +310,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
+        validate_collection_name(name)
+        validate_collection_metadata(metadata)
         if configuration is None:
             configuration = {}
 
@@ -346,6 +353,9 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
+        if new_name is not None:
+            validate_collection_name(new_name)
+        validate_collection_metadata(new_metadata)
         return await self._server._modify(
             id=id,
             new_name=new_name,
@@ -360,6 +370,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self,
         name: str,
     ) -> None:
+        validate_collection_name(name)
         return await self._server.delete_collection(
             name=name,
             tenant=self.tenant,
