@@ -1385,9 +1385,10 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             f"{list(set([type(e).__name__ for e in embeddings]))}"
         )
     for i, embedding in enumerate(embeddings):
-        if embedding.ndim == 0:
+        if embedding.ndim != 1:
             raise ValueError(
-                f"Expected a 1-dimensional array, got a 0-dimensional array {embedding}"
+                "Expected each embedding in the embeddings to be a 1-dimensional "
+                f"numpy array, got a {embedding.ndim}-dimensional array at pos {i}"
             )
         if embedding.size == 0:
             raise ValueError(
@@ -1404,6 +1405,11 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             raise ValueError(
                 "Expected each value in the embedding to be a int or float, got an embedding with "
                 f"{embedding.dtype} - {embedding}"
+            )
+        if embedding.size != embeddings[0].size:
+            raise ValueError(
+                "Expected all embeddings to have the same dimension, got embeddings "
+                f"of dimension {embeddings[0].size} and {embedding.size} at pos {i}"
             )
     return embeddings
 
