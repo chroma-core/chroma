@@ -2276,6 +2276,38 @@ def test_where_contains_validation():
     )
 
 
+def test_where_in_nin_rejects_non_scalar_operands():
+    """$in/$nin operand lists must contain only scalar values (str, int, float, bool)."""
+    from chromadb.api.types import validate_where
+
+    # Valid homogeneous scalar lists still pass
+    validate_where({"status": {"$in": ["active", "pending"]}})
+    validate_where({"scores": {"$in": [1, 2]}})
+    validate_where({"ratings": {"$nin": [1.5, 2.5]}})
+    validate_where({"flags": {"$in": [True, False]}})
+
+    # None is not a valid operand value
+    with pytest.raises(ValueError, match="str, int, float, or bool"):
+        validate_where({"status": {"$in": [None]}})
+    with pytest.raises(ValueError, match="str, int, float, or bool"):
+        validate_where({"status": {"$nin": [None, None]}})
+
+    # Nested lists are not valid operand values
+    with pytest.raises(ValueError, match="str, int, float, or bool"):
+        validate_where({"status": {"$in": [["active"], ["pending"]]}})
+
+    # Dicts are not valid operand values
+    with pytest.raises(ValueError, match="str, int, float, or bool"):
+        validate_where({"status": {"$in": [{"active": True}]}})
+
+    # Also rejected when nested inside $and/$or
+    with pytest.raises(ValueError, match="str, int, float, or bool"):
+        validate_where(
+            {"$and": [{"status": {"$in": [None]}}, {"year": {"$gt": 2020}}]}
+        )
+
+
+
 def _is_python_local_segment(client):
     """Return True when the client is backed by the Python local segment API
     (which does not yet support array metadata)."""
