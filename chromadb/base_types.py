@@ -109,6 +109,12 @@ class SparseVector:
             raise ValueError(
                 f"Expected {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {d.get(TYPE_KEY)}"
             )
+        for field in ("indices", "values"):
+            if field not in d:
+                raise ValueError(
+                    f"Expected dict with {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}' "
+                    f"to contain a '{field}' list, got keys: {sorted(d.keys())}"
+                )
         return cls(
             indices=d["indices"],
             values=d["values"],
