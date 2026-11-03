@@ -1,6 +1,12 @@
 import pytest
 from typing import List, cast, Dict, Any
-from chromadb.api.types import Documents, Image, Document, Embeddings
+from chromadb.api.types import (
+    Documents,
+    Image,
+    Document,
+    Embeddings,
+    validate_embeddings,
+)
 from chromadb.utils.embedding_functions import (
     EmbeddingFunction,
     register_embedding_function,
@@ -103,3 +109,14 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+def test_validate_embeddings_rejects_multidimensional_arrays() -> None:
+    with pytest.raises(ValueError, match="1-dimensional"):
+        validate_embeddings([np.zeros((2, 2), dtype=np.float32)])
+
+
+def test_validate_embeddings_rejects_inconsistent_dimensions() -> None:
+    with pytest.raises(ValueError, match="same dimension"):
+        validate_embeddings(
+            [np.array([1.0, 2.0], dtype=np.float32), np.array([1.0], dtype=np.float32)]
+        )
