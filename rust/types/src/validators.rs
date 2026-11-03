@@ -103,16 +103,40 @@ fn validate_metadata_key(key: &str) -> Result<(), ValidationError> {
     }
 }
 
+/// An empty list cannot be stored as a metadata value. The Python client rejects it before the
+/// request is sent; the REST path must answer the same way instead of persisting the record
+/// without the key.
+fn validate_non_empty_list(key: &str, is_empty: bool) -> Result<(), ValidationError> {
+    if is_empty {
+        Err(ValidationError::new("metadata").with_message(
+            format!(
+                "Expected metadata list value for key '{}' to be non-empty",
+                key
+            )
+            .into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Validate metadata
 pub fn validate_metadata(metadata: &Metadata) -> Result<(), ValidationError> {
     for (key, value) in metadata {
         validate_metadata_key(key)?;
 
-        if let MetadataValue::SparseVector(sv) = value {
-            sv.validate().map_err(|e| {
-                ValidationError::new("sparse_vector")
-                    .with_message(format!("Invalid sparse vector: {}", e).into())
-            })?;
+        match value {
+            MetadataValue::SparseVector(sv) => {
+                sv.validate().map_err(|e| {
+                    ValidationError::new("sparse_vector")
+                        .with_message(format!("Invalid sparse vector: {}", e).into())
+                })?;
+            }
+            MetadataValue::BoolArray(list) => validate_non_empty_list(key, list.is_empty())?,
+            MetadataValue::IntArray(list) => validate_non_empty_list(key, list.is_empty())?,
+            MetadataValue::FloatArray(list) => validate_non_empty_list(key, list.is_empty())?,
+            MetadataValue::StringArray(list) => validate_non_empty_list(key, list.is_empty())?,
+            _ => {}
         }
     }
     Ok(())
@@ -123,11 +147,20 @@ pub fn validate_update_metadata(metadata: &UpdateMetadata) -> Result<(), Validat
     for (key, value) in metadata {
         validate_metadata_key(key)?;
 
-        if let UpdateMetadataValue::SparseVector(sv) = value {
-            sv.validate().map_err(|e| {
-                ValidationError::new("sparse_vector")
-                    .with_message(format!("Invalid sparse vector: {}", e).into())
-            })?;
+        match value {
+            UpdateMetadataValue::SparseVector(sv) => {
+                sv.validate().map_err(|e| {
+                    ValidationError::new("sparse_vector")
+                        .with_message(format!("Invalid sparse vector: {}", e).into())
+                })?;
+            }
+            UpdateMetadataValue::BoolArray(list) => validate_non_empty_list(key, list.is_empty())?,
+            UpdateMetadataValue::IntArray(list) => validate_non_empty_list(key, list.is_empty())?,
+            UpdateMetadataValue::FloatArray(list) => validate_non_empty_list(key, list.is_empty())?,
+            UpdateMetadataValue::StringArray(list) => {
+                validate_non_empty_list(key, list.is_empty())?
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -408,6 +441,38 @@ mod tests {
     use super::*;
     use crate::operator::Key;
     use crate::{MetadataValue, SparseVector};
+
+    #[test]
+    fn empty_metadata_lists_are_rejected() {
+        // The REST body `{"items": []}` deserializes to an empty array variant.
+        let empty: MetadataValue = serde_json::from_str("[]").unwrap();
+        assert!(matches!(&empty, MetadataValue::BoolArray(list) if list.is_empty()));
+
+        let metadata = Metadata::from([("items".to_string(), empty)]);
+        assert!(validate_metadata(&metadata).is_err());
+
+        let update: UpdateMetadataValue = serde_json::from_str("[]").unwrap();
+        let update_metadata = UpdateMetadata::from([("items".to_string(), update)]);
+        assert!(validate_update_metadata(&update_metadata).is_err());
+    }
+
+    #[test]
+    fn non_empty_metadata_lists_are_accepted() {
+        let metadata = Metadata::from([
+            ("ints".to_string(), MetadataValue::IntArray(vec![1])),
+            (
+                "strs".to_string(),
+                MetadataValue::StringArray(vec!["a".to_string()]),
+            ),
+        ]);
+        assert!(validate_metadata(&metadata).is_ok());
+
+        let update_metadata = UpdateMetadata::from([(
+            "floats".to_string(),
+            UpdateMetadataValue::FloatArray(vec![1.5]),
+        )]);
+        assert!(validate_update_metadata(&update_metadata).is_ok());
+    }
 
     #[test]
     fn valid_simple_name() {
