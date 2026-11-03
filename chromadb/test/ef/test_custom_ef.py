@@ -1,9 +1,11 @@
 from chromadb.api.types import EmbeddingFunction, Embeddable, Embeddings
 import numpy as np
 from typing import cast, Any
+import pytest
 from chromadb.utils.embedding_functions import (
     register_embedding_function,
     known_embedding_functions,
+    config_to_embedding_function,
 )
 
 
@@ -93,3 +95,16 @@ def test_custom_ef_registration() -> None:
     assert "legacy_custom_embedding_function" not in known_embedding_functions
     assert "custom_embedding_function" not in known_embedding_functions
     assert "custom_embedding_function_with_registration" in known_embedding_functions
+
+def test_config_to_embedding_function_unknown_name_lists_options() -> None:
+    with pytest.raises(ValueError) as error:
+        config_to_embedding_function({"name": "nonexistent_embedding_function"})
+    message = str(error.value)
+    assert "nonexistent_embedding_function" in message
+    for known_name in known_embedding_functions:
+        assert known_name in message, f"'{known_name}' missing from the error message"
+
+
+def test_config_to_embedding_function_without_name_field() -> None:
+    with pytest.raises(ValueError, match="name"):
+        config_to_embedding_function({})
