@@ -79,7 +79,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         """
         embeddings = []
 
-        for item in input:
+        for position, item in enumerate(input):
             if is_image(item):
                 image = self._PILImage.fromarray(item)
 
@@ -114,6 +114,12 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
                 result = res.json()["embeddings"]
                 embeddings.append(np.array(result[0], dtype=np.float32))
+
+            else:
+                raise ValueError(
+                    "Expected input to be a str or an image (np.ndarray), got "
+                    f"{item!r} of type {type(item).__name__} at position {position}"
+                )
 
         # Cast to the expected Embeddings type
         return cast(Embeddings, embeddings)
