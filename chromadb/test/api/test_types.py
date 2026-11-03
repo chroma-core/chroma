@@ -103,3 +103,30 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+def test_sparse_vector_from_dict_missing_keys_raises_value_error() -> None:
+    # A dict tagged as a sparse vector must fail with a clear ValueError,
+    # not a raw KeyError, when the required keys are missing.
+    from chromadb.base_types import SPARSE_VECTOR_TYPE_VALUE, TYPE_KEY, SparseVector
+
+    with pytest.raises(ValueError) as error:
+        SparseVector.from_dict({TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE})
+    assert "indices" in str(error.value)
+
+    with pytest.raises(ValueError) as error:
+        SparseVector.from_dict({TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE, "values": [1.0]})
+    assert "indices" in str(error.value)
+
+
+def test_normalize_insert_record_set_malformed_sparse_vector_metadata() -> None:
+    # The unpack step of Collection.add/upsert/update must not raise a raw
+    # KeyError for a metadata dict tagged as a sparse vector with keys missing.
+    from chromadb.api.types import normalize_insert_record_set
+
+    with pytest.raises(ValueError) as error:
+        normalize_insert_record_set(
+            ids=["a"],
+            embeddings=[[1.0, 2.0]],
+            metadatas=[{"k": {"#type": "sparse_vector", "values": [1.0]}}],
+        )
+    assert "indices" in str(error.value)
