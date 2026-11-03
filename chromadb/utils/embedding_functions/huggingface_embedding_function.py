@@ -72,6 +72,13 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = hugging_face(texts)
         """
+        for position, document in enumerate(input):
+            if not isinstance(document, str):
+                raise ValueError(
+                    "The HuggingFace Embedding API only supports text documents, not images or other types; "
+                    f"got {type(document).__name__} at position {position}"
+                )
+
         # Call HuggingFace Embedding API for each document
         response = self._session.post(
             self._api_url,
@@ -195,6 +202,13 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = hugging_face(texts)
         """
+        for position, document in enumerate(input):
+            if not isinstance(document, str):
+                raise ValueError(
+                    "The HuggingFace Embedding Server only supports text documents, not images or other types; "
+                    f"got {type(document).__name__} at position {position}"
+                )
+
         # Call HuggingFace Embedding Server API for each document
         response = self._session.post(self._api_url, json={"inputs": input}).json()
 

@@ -59,6 +59,13 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
+        for position, document in enumerate(input):
+            if not isinstance(document, str):
+                raise ValueError(
+                    "SentenceTransformerEmbeddingFunction only supports text documents, not images or other types; "
+                    f"got {type(document).__name__} at position {position}"
+                )
+
         embeddings = self._model.encode(
             list(input),
             convert_to_numpy=True,
