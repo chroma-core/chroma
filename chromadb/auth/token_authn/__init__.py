@@ -166,7 +166,15 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
             )
             return
 
-        self._users = cast(List[User], yaml.safe_load("\n".join(creds))["users"])
+        credentials = yaml.safe_load("\n".join(creds))
+        if not isinstance(credentials, dict) or not isinstance(
+            credentials.get("users"), list
+        ):
+            raise ValueError(
+                "Invalid credentials: expected a YAML document with a top-level "
+                "'users' key holding a list of users."
+            )
+        self._users = cast(List[User], credentials["users"])
         for user in self._users:
             if "tokens" not in user:
                 raise ValueError("User missing tokens")
