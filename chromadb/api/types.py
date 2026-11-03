@@ -869,7 +869,11 @@ class EmbeddingFunction(Protocol[D]):
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
             result = call(self, input)
-            assert result is not None
+            if result is None:
+                raise ValueError(
+                    f"Embedding function {self.__class__.__name__} returned None; "
+                    "expected a list of embeddings."
+                )
             return validate_embeddings(cast(Embeddings, normalize_embeddings(result)))
 
         setattr(cls, "__call__", __call__)
@@ -1523,7 +1527,11 @@ class SparseEmbeddingFunction(Protocol[D]):
 
         def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseVectors:
             result = call(self, input)
-            assert result is not None
+            if result is None:
+                raise ValueError(
+                    f"Sparse embedding function {self.__class__.__name__} returned "
+                    "None; expected a list of sparse vectors."
+                )
             return validate_sparse_vectors(cast(SparseVectors, result))
 
         setattr(cls, "__call__", __call__)

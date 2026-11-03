@@ -103,3 +103,37 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+def test_embedding_function_raises_value_error_when_response_is_none() -> None:
+    @register_embedding_function
+    class NoneEmbeddingFunction(EmbeddingFunction[Documents]):
+        def __init__(self) -> None:
+            pass
+
+        @staticmethod
+        def name() -> str:
+            return "test-none"
+
+        @staticmethod
+        def build_from_config(config: Dict[str, Any]) -> "NoneEmbeddingFunction":
+            return NoneEmbeddingFunction()
+
+        def get_config(self) -> Dict[str, Any]:
+            return {}
+
+        @staticmethod
+        def validate_config(config: Dict[str, Any]) -> None:
+            pass
+
+        def validate_config_update(
+            self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+        ) -> None:
+            pass
+
+        def __call__(self, input: Documents) -> Embeddings:
+            # Return None instead of a list of embeddings
+            return None  # type: ignore[return-value]
+
+    ef = NoneEmbeddingFunction()
+    with pytest.raises(ValueError, match="NoneEmbeddingFunction"):
+        ef(Documents(["hello"]))
