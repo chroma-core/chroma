@@ -117,7 +117,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
             Embeddings for the documents or images.
         """
         embeddings: Embeddings = []
-        for item in input:
+        for position, item in enumerate(input):
             if is_image(item):
                 embeddings.append(
                     np.array(self._encode_image(cast(Image, item)), dtype=np.float32)
@@ -125,6 +125,11 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
             elif is_document(item):
                 embeddings.append(
                     np.array(self._encode_text(cast(Document, item)), dtype=np.float32)
+                )
+            else:
+                raise ValueError(
+                    "Expected input to be a str document or an image (np.ndarray), "
+                    f"got {item!r} of type {type(item).__name__} at position {position}"
                 )
 
         return embeddings
