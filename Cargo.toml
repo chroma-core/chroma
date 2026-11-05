@@ -5,7 +5,7 @@ members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "ru
 
 [workspace.dependencies]
 anyhow = "1.0"
-arrow = "55.1"
+arrow = "57.3.2"
 async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
@@ -34,7 +34,7 @@ opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
 opentelemetry-http = { version = "0.27", features = ["reqwest-rustls"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
-parquet = { version = "55.1", features = ["async"] }
+parquet = { version = "57.3.2", features = ["async"] }
 pin-project = "1.1.10"
 prost = "0.14"
 prost-types = "0.14"
