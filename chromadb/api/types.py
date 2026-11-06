@@ -880,7 +880,7 @@ class EmbeddingFunction(Protocol[D]):
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Initialize the embedding function. This method should be overriden."""
+        """Initialize the embedding function. This method should be overridden."""
 
         warnings.warn(
             f"The class {self.__class__.__name__} does not implement __init__. "
