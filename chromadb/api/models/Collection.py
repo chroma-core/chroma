@@ -296,6 +296,298 @@ class Collection(CollectionCommon["ServerAPI"]):
             response=query_results, include=query_request["include"]
         )
 
+    def hybrid_search(
+        self,
+        query_texts: OneOrMany[Document],
+        query_embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[PyEmbedding],
+            ]
+        ] = None,
+        n_results: int = 10,
+        n_candidates: int = 100,
+        alpha: float = 0.5,
+        fusion_method: str = "rrf",
+        rrf_k: int = 60,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        ids: Optional[OneOrMany[ID]] = None,
+        include: Include = [
+            "metadatas",
+            "documents",
+            "distances",
+        ],
+    ) -> QueryResult:
+        """Perform hybrid search combining BM25 keyword search with vector similarity.
+
+        Uses Reciprocal Rank Fusion (RRF) or linear combination to merge results
+        from both retrieval strategies for improved relevance.
+
+        This is a batch query API. Multiple queries can be performed at once
+        by providing multiple query texts.
+
+        >>> collection.hybrid_search(
+        >>>     query_texts=["what is machine learning"],
+        >>>     n_results=10,
+        >>> )
+
+        Args:
+            query_texts: Text queries to search for. These are used both for
+                        embedding (vector search) and BM25 keyword scoring.
+            query_embeddings: Pre-computed embeddings. If not provided,
+                            embeddings are computed from query_texts.
+            n_results: Number of final fused results to return per query.
+            n_candidates: Number of candidates to retrieve from vector search
+                        (larger values improve keyword recall).
+            alpha: Weight for vector scores in linear fusion (0=keyword only, 1=vector only).
+                  Only used when fusion_method="linear".
+            fusion_method: Fusion strategy - "rrf" (default) or "linear".
+            rrf_k: RRF smoothing constant (default 60).
+            where: Metadata filter applied to vector search and keyword search.
+            where_document: Document content filter.
+            ids: Optional subset of IDs to search within.
+            include: Fields to include in results. Defaults to
+                    ["metadatas", "documents", "distances"].
+
+        Returns:
+            QueryResult: Fused nearest neighbor results with BM25 keyword boosting.
+
+        Raises:
+            ValueError: If no query text is provided.
+        """
+        from chromadb.utils.hybrid_search import (
+            BM25Scorer,
+            reciprocal_rank_fusion,
+            combine_ranked_lists,
+            tokenize,
+        )
+
+        # Validate fusion_method
+        if fusion_method not in ("rrf", "linear"):
+            raise ValueError(
+                f"fusion_method must be 'rrf' or 'linear', got '{fusion_method}'"
+            )
+
+        # Validate and prepare the query request (includes embedding computation)
+        query_request = self._validate_and_prepare_query_request(
+            query_embeddings=query_embeddings,
+            query_texts=query_texts,
+            query_images=None,
+            query_uris=None,
+            ids=ids,
+            n_results=max(n_results, n_candidates),
+            where=where,
+            where_document=where_document,
+            include=["metadatas", "documents", "distances"],
+        )
+
+        # Get raw query texts (un-embedded) for BM25 keyword scoring
+        query_texts_list = self._normalize_hybrid_query_texts(query_texts)
+
+        query_embeddings_list = query_request["embeddings"]
+        filter_ids = query_request["ids"]
+        filter_where = query_request["where"]
+        filter_where_document = query_request["where_document"]
+
+        all_ids_out: List[IDs] = []
+        all_documents_out: Optional[List[List[Document]]] = (
+            [] if "documents" in include else None
+        )
+        all_metadatas_out: Optional[List[List[Metadata]]] = (
+            [] if "metadatas" in include else None
+        )
+        all_distances_out: Optional[List[List[float]]] = (
+            [] if "distances" in include else None
+        )
+        all_embeddings_out: Optional[List[PyEmbeddings]] = (
+            [] if "embeddings" in include else None
+        )
+
+        for i, query_text in enumerate(query_texts_list):
+            query_emb = query_embeddings_list[i]
+
+            # Step 1: Vector search to get a pool of candidates
+            vector_results = self._client._query(
+                collection_id=self.id,
+                ids=filter_ids,
+                query_embeddings=[query_emb],
+                n_results=n_candidates,
+                where=filter_where,
+                where_document=filter_where_document,
+                include=["metadatas", "documents", "distances"],
+                tenant=self.tenant,
+                database=self.database,
+            )
+
+            vec_ids = vector_results["ids"][0] if vector_results["ids"] else []
+            vec_docs = (
+                vector_results["documents"][0]
+                if vector_results["documents"]
+                else []
+            )
+            vec_distances = (
+                vector_results["distances"][0]
+                if vector_results["distances"]
+                else []
+            )
+
+            # Build vector results as (id, distance) for fusion
+            # Convert distance to similarity-like score (lower distance = better)
+            vector_ranked: List[Tuple[str, float]] = []
+            for j, vid in enumerate(vec_ids):
+                dist = vec_distances[j] if j < len(vec_distances) else float("inf")
+                # Use negative distance: higher (less negative) = better match
+                vector_ranked.append((vid, -dist))
+
+            # Step 2: Keyword search on documents using $contains
+            # Split query into terms and search for documents containing any term
+            query_terms = tokenize(query_text)
+            keyword_ids: set = set()
+            keyword_docs_map: Dict[str, str] = {}
+
+            if query_terms:
+                # Search for documents containing the query text
+                for term in query_terms[:5]:  # Limit to first 5 terms for efficiency
+                    try:
+                        keyword_results = self._client._get(
+                            collection_id=self.id,
+                            ids=filter_ids if filter_ids else None,
+                            where=filter_where,
+                            where_document={"$contains": term},
+                            limit=n_candidates,
+                            include=["documents"],
+                            tenant=self.tenant,
+                            database=self.database,
+                        )
+                        if keyword_results["ids"]:
+                            for kid, kdoc in zip(
+                                keyword_results["ids"],
+                                keyword_results.get("documents") or [],
+                            ):
+                                keyword_ids.add(kid)
+                                if kdoc:
+                                    keyword_docs_map[kid] = kdoc
+                    except Exception:
+                        # If $contains is not supported, fall back to scoring
+                        # vector candidates only
+                        pass
+
+            # Step 3: Combine candidate sets from both strategies
+            all_candidate_ids = set(vec_ids)
+            all_candidate_ids.update(keyword_ids)
+
+            # Build document map for BM25 scoring
+            docs_for_bm25: Dict[str, str] = {}
+            # From vector results
+            for j, vid in enumerate(vec_ids):
+                doc = vec_docs[j] if j < len(vec_docs) else None
+                if doc:
+                    docs_for_bm25[vid] = doc
+            # From keyword results
+            docs_for_bm25.update(keyword_docs_map)
+
+            # Step 4: BM25 scoring
+            bm25_ranked: List[Tuple[str, float]] = []
+            if docs_for_bm25:
+                doc_ids_list = list(docs_for_bm25.keys())
+                doc_texts_list = [docs_for_bm25[did] for did in doc_ids_list]
+
+                bm25 = BM25Scorer()
+                bm25.fit(doc_texts_list)
+
+                scored = bm25.score(query_text)
+                # Map back to original IDs
+                bm25_ranked = [
+                    (doc_ids_list[idx], score)
+                    for idx, score in scored
+                    if idx < len(doc_ids_list)
+                ]
+
+            # Step 5: Fuse using RRF or linear combination
+            if fusion_method == "rrf":
+                fused = reciprocal_rank_fusion(
+                    [vector_ranked, bm25_ranked],
+                    k=rrf_k,
+                    weights=[1.0 - alpha, alpha] if alpha != 0.5 else None,
+                )
+            else:
+                fused = combine_ranked_lists(
+                    bm25_ranked, vector_ranked, alpha=alpha
+                )
+
+            # Step 6: Take top n_results
+            fused = fused[:n_results]
+            fused_ids = [fid for fid, _ in fused]
+            fused_scores = [fscore for _, fscore in fused]
+
+            # Step 7: Hydrate results with metadata/documents
+            hydrated = self._client._get(
+                collection_id=self.id,
+                ids=fused_ids,
+                include=["metadatas", "documents"],
+                tenant=self.tenant,
+                database=self.database,
+            )
+
+            # Reorder hydrated results to match fused order
+            id_to_idx = {hid: idx for idx, hid in enumerate(hydrated["ids"])}
+            reordered_ids = fused_ids
+            reordered_docs: Optional[List[Document]] = None
+            reordered_metas: Optional[List[Metadata]] = None
+
+            if hydrated["documents"] is not None:
+                reordered_docs = [
+                    hydrated["documents"][id_to_idx[fid]]
+                    if fid in id_to_idx
+                    else None
+                    for fid in fused_ids
+                ]
+            if hydrated["metadatas"] is not None:
+                reordered_metas = [
+                    hydrated["metadatas"][id_to_idx[fid]]
+                    if fid in id_to_idx
+                    else None
+                    for fid in fused_ids
+                ]
+
+            all_ids_out.append(reordered_ids)
+            if all_documents_out is not None:
+                all_documents_out.append(reordered_docs or [])
+            if all_metadatas_out is not None:
+                all_metadatas_out.append(reordered_metas or [])
+            if all_distances_out is not None:
+                all_distances_out.append(fused_scores)
+            if all_embeddings_out is not None:
+                all_embeddings_out.append([])
+
+        result: QueryResult = {
+            "ids": all_ids_out,
+            "embeddings": all_embeddings_out,
+            "documents": all_documents_out,
+            "uris": None,
+            "data": None,
+            "metadatas": all_metadatas_out,
+            "distances": all_distances_out,
+            "included": [inc for inc in include if inc != "embeddings"],
+        }
+
+        return result
+
+    def _normalize_hybrid_query_texts(
+        self,
+        query_texts: OneOrMany[Document],
+    ) -> List[str]:
+        """Normalize query texts for hybrid search into a list of strings.
+
+        Returns:
+            List of query text strings.
+        """
+        texts = maybe_cast_one_to_many(query_texts)
+        if texts is None or len(texts) == 0:
+            raise ValueError("query_texts must be a non-empty list of strings")
+        return texts
+
     def modify(
         self,
         name: Optional[str] = None,
