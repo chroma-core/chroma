@@ -75,10 +75,14 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     # Mixing asyncio and threading in this manner usually discouraged, but
     # this gives a better user experience with practically no downsides.
     # https://github.com/encode/httpx/issues/2058
-    _clients: Dict[int, httpx.AsyncClient] = {}
+    # The cache is per-instance (set in __init__), not shared on the class: each
+    # client bakes this instance's headers, credentials and limits into the httpx
+    # client it caches.
+    _clients: Dict[int, httpx.AsyncClient]
 
     def __init__(self, system: System):
         super().__init__(system)
+        self._clients = {}
 
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")

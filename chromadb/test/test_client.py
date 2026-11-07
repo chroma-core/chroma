@@ -1,11 +1,14 @@
 import asyncio
+import threading
 from typing import Any, Awaitable, Callable, Generator, cast, Dict, Tuple
 from unittest.mock import MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
+from chromadb.api.async_fastapi import AsyncFastAPI
 from chromadb.api.fastapi import FastAPI
+import httpx
 import pytest
 import tempfile
 import os
@@ -197,6 +200,102 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+def make_async_fastapi(host: str, port: int, token: str = "") -> AsyncFastAPI:
+    # No server is needed: building the client and asking for its httpx client
+    # does not open a connection.
+    headers = {"Authorization": f"Bearer {token}"} if token else None
+    settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host=host,
+        chroma_server_http_port=port,
+        chroma_server_headers=headers,
+        anonymized_telemetry=False,
+    )
+    return AsyncFastAPI(System(settings))
+
+
+async def test_async_fastapi_instances_do_not_share_client_or_credentials() -> None:
+    api_a = make_async_fastapi("host-a", 8000, "TOKEN-A")
+    api_b = make_async_fastapi("host-b", 8001, "TOKEN-B")
+
+    client_a = api_a._get_client()
+    client_b = api_b._get_client()
+
+    assert client_a is not client_b
+    assert client_a.headers["Authorization"] == "Bearer TOKEN-A"
+    assert client_b.headers["Authorization"] == "Bearer TOKEN-B"
+    # httpx lowercases header names when they are converted to a dict
+    assert api_a.get_request_headers()["authorization"] == "Bearer TOKEN-A"
+    assert api_b.get_request_headers()["authorization"] == "Bearer TOKEN-B"
+
+    await api_a._cleanup()
+    await api_b._cleanup()
+
+
+async def test_async_fastapi_instance_without_credentials_does_not_inherit_them() -> (
+    None
+):
+    api_a = make_async_fastapi("host-a", 8000, "TOKEN-A")
+    api_b = make_async_fastapi("host-b", 8001)
+
+    api_a._get_client()
+    client_b = api_b._get_client()
+
+    assert "Authorization" not in client_b.headers
+
+    await api_a._cleanup()
+    await api_b._cleanup()
+
+
+async def test_async_fastapi_reuses_client_within_instance_and_event_loop() -> None:
+    api = make_async_fastapi("host-a", 8000, "TOKEN-A")
+
+    assert api._get_client() is api._get_client()
+    assert len(api._clients) == 1
+
+    await api._cleanup()
+
+
+def test_async_fastapi_client_is_not_shared_across_event_loops() -> None:
+    # The cache is still keyed by event loop: a client built on one loop must
+    # not be handed out on another. Both loops are kept alive at once, because
+    # the key is hash(loop) and a freed loop's hash can be reused by a new one.
+    api = make_async_fastapi("host-a", 8000, "TOKEN-A")
+    barrier = threading.Barrier(2)
+    clients: list[httpx.AsyncClient] = []
+
+    async def grab() -> None:
+        clients.append(api._get_client())
+        barrier.wait(timeout=10)  # hold this loop open until the other has a client
+
+    threads = [threading.Thread(target=lambda: asyncio.run(grab())) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(clients) == 2
+    assert clients[0] is not clients[1]
+    assert len(api._clients) == 2
+
+
+async def test_async_fastapi_cleanup_only_closes_its_own_clients() -> None:
+    api_a = make_async_fastapi("host-a", 8000, "TOKEN-A")
+    api_b = make_async_fastapi("host-b", 8001, "TOKEN-B")
+    client_a = api_a._get_client()
+    client_b = api_b._get_client()
+
+    await api_a._cleanup()
+
+    assert client_a.is_closed
+    assert not client_b.is_closed
+    assert api_a._clients == {}
+    assert api_b._get_client() is client_b
+
+    await api_b._cleanup()
+    assert client_b.is_closed
 
 
 def test_persistent_client_close() -> None:
