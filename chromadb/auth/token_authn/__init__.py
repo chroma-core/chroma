@@ -169,7 +169,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         self._users = cast(List[User], yaml.safe_load("\n".join(creds))["users"])
         for user in self._users:
             if "tokens" not in user:
-                raise ValueError("User missing tokens")
+                raise InvalidArgumentError("User missing tokens")
             if "tenant" not in user:
                 user["tenant"] = "*"
             if "databases" not in user:
@@ -180,7 +180,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
                     token in self._token_user_mapping
                     and self._token_user_mapping[token] != user
                 ):
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Token {token} already in use: wanted to use it for "
                         f"user {user['id']} but it's already in use by "
                         f"user {self._token_user_mapping[token]}"
