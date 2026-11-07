@@ -221,7 +221,7 @@ class LocalHnswSegment(VectorReader):
 
     @trace_method("LocalHnswSegment._ensure_index", OpenTelemetryGranularity.ALL)
     def _ensure_index(self, n: int, dim: int) -> None:
-        """Create or resize the index as necessary to accomodate N new records"""
+        """Create or resize the index as necessary to accommodate N new records"""
         if not self._index:
             self._dimensionality = dim
             self._init_index(dim)
