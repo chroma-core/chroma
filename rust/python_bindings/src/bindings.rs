@@ -448,88 +448,15 @@ impl Bindings {
         sqlite_db_config: SqliteDBConfig,
         hnsw_cache_size: usize,
         persist_path: Option<String>,
+        py: Python<'_>,
     ) -> ChromaPyResult<Self> {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let _guard = runtime.enter();
-        let system = System::new();
-        let registry = Registry::new();
-
-        //////////////////////////// Frontend Setup ////////////////////////////
-
-        let cache_config = FoyerCacheConfig {
-            capacity: hnsw_cache_size,
-            ..Default::default()
-        };
-        let cache_config = chroma_cache::CacheConfig::Memory(cache_config);
-        let segment_manager_config = LocalSegmentManagerConfig {
-            hnsw_index_pool_cache_config: cache_config,
-            persist_path,
-        };
-
-        // TODO: consume the log configuration from the input python
-        let sysdb_config = SysDbConfig::Sqlite(SqliteSysDbConfig {
-            log_topic_namespace: "default".to_string(),
-            log_tenant: "default".to_string(),
-        });
-
-        let log_config = LogConfig::Sqlite(SqliteLogConfig {
-            tenant_id: "default".to_string(),
-            topic_namespace: "default".to_string(),
-        });
-
-        let collection_cache_config = CollectionsWithSegmentsProviderConfig {
-            // No retry to sysdb on local chroma
-            cache_invalidation_retry_policy: CacheInvalidationRetryConfig::new(0, 0),
-            permitted_parallelism: 32,
-            cache: chroma_cache::CacheConfig::Nop,
-            cache_ttl_secs: 60,
-        };
-
-        let executor_config = ExecutorConfig::Local(LocalExecutorConfig {});
-
-        let knn_index = KnnIndex::Hnsw;
-        let enable_schema = true;
-
-        let frontend_config = FrontendConfig {
-            allow_reset,
-            segment_manager: Some(segment_manager_config),
-            sqlitedb: Some(sqlite_db_config),
-            sysdb: sysdb_config,
-            mcmr_sysdb: None,
-            collections_with_segments_provider: collection_cache_config,
-            log: log_config,
-            executor: executor_config,
-            default_knn_index: knn_index,
-            tenants_to_migrate_immediately: vec![],
-            tenants_to_migrate_immediately_threshold: None,
-            enable_schema,
-            min_records_for_invocation: default_min_records_for_invocation(),
-            tenants_with_quantization_enabled: vec![],
-            tenants_with_maxscore_enabled: vec![],
-            tenants_with_token_bitmap_fts_enabled: vec![],
-            tenants_with_transactions_enabled: vec![],
-            enable_log_scouting: false,
-            enable_transactions: false,
-        };
-
-        let frontend = runtime.block_on(async {
-            Frontend::try_from_config(&(frontend_config, system.clone()), &registry).await
-        })?;
-        let sqlite_db = registry.get::<SqliteDb>()?;
-        let compactor_handle = registry.get::<ComponentHandle<LocalCompactionManager>>()?;
-
-        Ok(Bindings {
-            runtime,
-            system,
-            sqlite_db,
-            compactor_handle,
-            frontend,
-            closed: false,
+        py.allow_threads(move || {
+            Self::new_inner(allow_reset, sqlite_db_config, hnsw_cache_size, persist_path)
         })
     }
 
-    fn close(&mut self) {
-        self.shutdown();
+    fn close(&mut self, py: Python<'_>) {
+        py.allow_threads(|| self.shutdown());
     }
 
     /// Returns the current eopch time in ns
@@ -548,15 +475,17 @@ impl Bindings {
 
     ////////////////////////////// Admin API //////////////////////////////
 
-    fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> ChromaPyResult<()> {
+    fn create_database(&self, name: String, tenant: String, py: Python<'_>) -> ChromaPyResult<()> {
         let database_name = DatabaseName::new(name).ok_or_else(|| {
             InvalidDatabaseNameError("database name must be at least 3 characters".to_string())
         })?;
         let request = CreateDatabaseRequest::try_new(tenant, database_name)?;
         let mut frontend = self.frontend.clone();
 
-        self.runtime
-            .block_on(async { frontend.create_database(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.create_database(request).await })
+        })?;
 
         Ok(())
     }
@@ -565,7 +494,7 @@ impl Bindings {
         &self,
         name: String,
         tenant: String,
-        _py: Python<'_>,
+        py: Python<'_>,
     ) -> ChromaPyResult<Database> {
         let database_name = DatabaseName::new(name).ok_or_else(|| {
             InvalidDatabaseNameError("database name must be at least 3 characters".to_string())
@@ -573,18 +502,21 @@ impl Bindings {
         let request = GetDatabaseRequest::try_new(tenant, database_name)?;
 
         let mut frontend = self.frontend.clone();
-        let database = self
-            .runtime
-            .block_on(async { frontend.get_database(request).await })?;
+        let database = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.get_database(request).await })
+        })?;
 
         Ok(database)
     }
 
-    fn delete_database(&self, name: String, tenant: String) -> ChromaPyResult<()> {
+    fn delete_database(&self, name: String, tenant: String, py: Python<'_>) -> ChromaPyResult<()> {
         let request = DeleteDatabaseRequest::try_new(tenant, name)?;
         let mut frontend = self.frontend.clone();
-        self.runtime
-            .block_on(async { frontend.delete_database(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.delete_database(request).await })
+        })?;
 
         Ok(())
     }
@@ -595,44 +527,55 @@ impl Bindings {
         limit: Option<u32>,
         offset: Option<u32>,
         tenant: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<Vec<Database>> {
         let request = ListDatabasesRequest::try_new(tenant, limit, offset.unwrap_or(0))?;
         let mut frontend = self.frontend.clone();
 
-        let databases = self
-            .runtime
-            .block_on(async { frontend.list_databases(request).await })?;
+        let databases = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.list_databases(request).await })
+        })?;
         Ok(databases)
     }
 
-    fn create_tenant(&self, name: String) -> ChromaPyResult<()> {
+    fn create_tenant(&self, name: String, py: Python<'_>) -> ChromaPyResult<()> {
         let request = CreateTenantRequest::try_new(name)?;
         let mut frontend = self.frontend.clone();
 
-        self.runtime
-            .block_on(async { frontend.create_tenant(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.create_tenant(request).await })
+        })?;
         Ok(())
     }
 
-    fn get_tenant(&self, name: String) -> ChromaPyResult<GetTenantResponse> {
+    fn get_tenant(&self, name: String, py: Python<'_>) -> ChromaPyResult<GetTenantResponse> {
         let request = GetTenantRequest::try_new(name)?;
         let mut frontend = self.frontend.clone();
 
-        let tenant = self
-            .runtime
-            .block_on(async { frontend.get_tenant(request).await })?;
+        let tenant = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.get_tenant(request).await })
+        })?;
         Ok(tenant)
     }
 
     ////////////////////////////// Base API //////////////////////////////
-    fn count_collections(&self, tenant: String, database: String) -> ChromaPyResult<u32> {
+    fn count_collections(
+        &self,
+        tenant: String,
+        database: String,
+        py: Python<'_>,
+    ) -> ChromaPyResult<u32> {
         let database_name =
             DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request = CountCollectionsRequest::try_new(tenant, database_name)?;
         let mut frontend = self.frontend.clone();
-        let count = self
-            .runtime
-            .block_on(async { frontend.count_collections(request).await })?;
+        let count = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.count_collections(request).await })
+        })?;
         Ok(count)
     }
 
@@ -643,15 +586,17 @@ impl Bindings {
         offset: Option<u32>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<Vec<Collection>> {
         let database_name =
             DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request =
             ListCollectionsRequest::try_new(tenant, database_name, limit, offset.unwrap_or(0))?;
         let mut frontend = self.frontend.clone();
-        let collections = self
-            .runtime
-            .block_on(async { frontend.list_collections(request).await })?;
+        let collections = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.list_collections(request).await })
+        })?;
         Ok(collections)
     }
 
@@ -668,6 +613,7 @@ impl Bindings {
         get_or_create: bool,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<Collection> {
         let configuration_json = match configuration_json_str {
             Some(configuration_json_str) => {
@@ -716,9 +662,10 @@ impl Bindings {
         )?;
 
         let mut frontend = self.frontend.clone();
-        let collection = self
-            .runtime
-            .block_on(async { frontend.create_collection(request).await })?;
+        let collection = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.create_collection(request).await })
+        })?;
 
         Ok(collection)
     }
@@ -728,14 +675,16 @@ impl Bindings {
         name: String,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<Collection> {
         let database_name =
             DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request = GetCollectionRequest::try_new(tenant, database_name, name)?;
         let mut frontend = self.frontend.clone();
-        let collection = self
-            .runtime
-            .block_on(async { frontend.get_collection(request).await })?;
+        let collection = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.get_collection(request).await })
+        })?;
         Ok(collection)
     }
 
@@ -745,14 +694,16 @@ impl Bindings {
         collection_id: String,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<Collection> {
         let database_name =
             DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request = GetCollectionByIdRequest::try_new(collection_id, tenant, database_name)?;
         let mut frontend = self.frontend.clone();
-        let collection = self
-            .runtime
-            .block_on(async { frontend.get_collection_by_id(request).await })?;
+        let collection = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.get_collection_by_id(request).await })
+        })?;
         Ok(collection)
     }
 
@@ -765,6 +716,7 @@ impl Bindings {
         new_name: Option<String>,
         new_metadata: Option<UpdateMetadata>,
         new_configuration_json_str: Option<String>,
+        py: Python<'_>,
     ) -> ChromaPyResult<()> {
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -796,8 +748,10 @@ impl Bindings {
         )?;
 
         let mut frontend = self.frontend.clone();
-        self.runtime
-            .block_on(async { frontend.update_collection(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.update_collection(request).await })
+        })?;
 
         Ok(())
     }
@@ -807,11 +761,14 @@ impl Bindings {
         name: String,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<()> {
         let request = DeleteCollectionRequest::try_new(tenant, database, name)?;
         let mut frontend = self.frontend.clone();
-        self.runtime
-            .block_on(async { frontend.delete_collection(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.delete_collection(request).await })
+        })?;
         Ok(())
     }
 
@@ -831,6 +788,7 @@ impl Bindings {
         uris: Option<Vec<Option<String>>>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
@@ -857,8 +815,10 @@ impl Bindings {
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        self.runtime
-            .block_on(async { frontend_clone.add(req).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend_clone.add(req).await })
+        })?;
         Ok(true)
     }
 
@@ -876,6 +836,7 @@ impl Bindings {
         uris: Option<Vec<Option<String>>>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
@@ -903,8 +864,10 @@ impl Bindings {
             metadatas,
         )?;
 
-        self.runtime
-            .block_on(async { frontend_clone.update(req).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend_clone.update(req).await })
+        })?;
 
         Ok(true)
     }
@@ -923,6 +886,7 @@ impl Bindings {
         uris: Option<Vec<Option<String>>>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
@@ -950,8 +914,10 @@ impl Bindings {
             metadatas,
         )?;
 
-        self.runtime
-            .block_on(async { frontend_clone.upsert(req).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend_clone.upsert(req).await })
+        })?;
         Ok(true)
     }
 
@@ -968,6 +934,7 @@ impl Bindings {
         limit: Option<u32>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<u32> {
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
@@ -989,9 +956,10 @@ impl Bindings {
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        let response = self
-            .runtime
-            .block_on(async { Box::pin(frontend_clone.delete(request, String::new())).await })?;
+        let response = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { Box::pin(frontend_clone.delete(request, String::new())).await })
+        })?;
         Ok(response.deleted)
     }
 
@@ -1276,6 +1244,7 @@ impl Bindings {
         collection_id: String,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<CountResponse> {
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -1289,9 +1258,10 @@ impl Bindings {
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        let result = self
-            .runtime
-            .block_on(async { frontend_clone.count(request).await })?;
+        let result = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend_clone.count(request).await })
+        })?;
         Ok(result)
     }
 
@@ -1391,9 +1361,9 @@ impl Bindings {
         Ok(response)
     }
 
-    fn reset(&self) -> ChromaPyResult<bool> {
+    fn reset(&self, py: Python<'_>) -> ChromaPyResult<bool> {
         let mut frontend = self.frontend.clone();
-        self.runtime.block_on(async { frontend.reset().await })?;
+        py.allow_threads(move || self.runtime.block_on(async { frontend.reset().await }))?;
         Ok(true)
     }
 
@@ -1410,6 +1380,91 @@ impl Bindings {
 }
 
 impl Bindings {
+    fn new_inner(
+        allow_reset: bool,
+        sqlite_db_config: SqliteDBConfig,
+        hnsw_cache_size: usize,
+        persist_path: Option<String>,
+    ) -> ChromaPyResult<Self> {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let _guard = runtime.enter();
+        let system = System::new();
+        let registry = Registry::new();
+
+        //////////////////////////// Frontend Setup ////////////////////////////
+
+        let cache_config = FoyerCacheConfig {
+            capacity: hnsw_cache_size,
+            ..Default::default()
+        };
+        let cache_config = chroma_cache::CacheConfig::Memory(cache_config);
+        let segment_manager_config = LocalSegmentManagerConfig {
+            hnsw_index_pool_cache_config: cache_config,
+            persist_path,
+        };
+
+        // TODO: consume the log configuration from the input python
+        let sysdb_config = SysDbConfig::Sqlite(SqliteSysDbConfig {
+            log_topic_namespace: "default".to_string(),
+            log_tenant: "default".to_string(),
+        });
+
+        let log_config = LogConfig::Sqlite(SqliteLogConfig {
+            tenant_id: "default".to_string(),
+            topic_namespace: "default".to_string(),
+        });
+
+        let collection_cache_config = CollectionsWithSegmentsProviderConfig {
+            // No retry to sysdb on local chroma
+            cache_invalidation_retry_policy: CacheInvalidationRetryConfig::new(0, 0),
+            permitted_parallelism: 32,
+            cache: chroma_cache::CacheConfig::Nop,
+            cache_ttl_secs: 60,
+        };
+
+        let executor_config = ExecutorConfig::Local(LocalExecutorConfig {});
+
+        let knn_index = KnnIndex::Hnsw;
+        let enable_schema = true;
+
+        let frontend_config = FrontendConfig {
+            allow_reset,
+            segment_manager: Some(segment_manager_config),
+            sqlitedb: Some(sqlite_db_config),
+            sysdb: sysdb_config,
+            mcmr_sysdb: None,
+            collections_with_segments_provider: collection_cache_config,
+            log: log_config,
+            executor: executor_config,
+            default_knn_index: knn_index,
+            tenants_to_migrate_immediately: vec![],
+            tenants_to_migrate_immediately_threshold: None,
+            enable_schema,
+            min_records_for_invocation: default_min_records_for_invocation(),
+            tenants_with_quantization_enabled: vec![],
+            tenants_with_maxscore_enabled: vec![],
+            tenants_with_token_bitmap_fts_enabled: vec![],
+            tenants_with_transactions_enabled: vec![],
+            enable_log_scouting: false,
+            enable_transactions: false,
+        };
+
+        let frontend = runtime.block_on(async {
+            Frontend::try_from_config(&(frontend_config, system.clone()), &registry).await
+        })?;
+        let sqlite_db = registry.get::<SqliteDb>()?;
+        let compactor_handle = registry.get::<ComponentHandle<LocalCompactionManager>>()?;
+
+        Ok(Bindings {
+            runtime,
+            system,
+            sqlite_db,
+            compactor_handle,
+            frontend,
+            closed: false,
+        })
+    }
+
     fn shutdown(&mut self) {
         if self.closed {
             return;
@@ -1455,7 +1510,7 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let bindings = Bindings::py_new(true, sqlite_db_config, 16, Some(persist_path))
+        let bindings = Bindings::new_inner(true, sqlite_db_config, 16, Some(persist_path))
             .expect("persistent bindings");
 
         (temp_dir, bindings)
@@ -1465,7 +1520,7 @@ mod tests {
     fn close_closes_sqlite_pool() {
         let (temp_dir, mut bindings) = new_persistent_bindings();
 
-        bindings.close();
+        bindings.shutdown();
 
         assert!(bindings.closed);
         assert!(bindings.sqlite_db.get_conn().is_closed());
@@ -1476,8 +1531,8 @@ mod tests {
     fn close_is_idempotent() {
         let (temp_dir, mut bindings) = new_persistent_bindings();
 
-        bindings.close();
-        bindings.close();
+        bindings.shutdown();
+        bindings.shutdown();
 
         assert!(bindings.closed);
         assert!(bindings.sqlite_db.get_conn().is_closed());
