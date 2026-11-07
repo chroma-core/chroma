@@ -49,6 +49,8 @@ pub struct GarbageCollectorConfig {
         default = "GarbageCollectorConfig::default_max_concurrent_list_files_operations_per_collection"
     )]
     pub(super) max_concurrent_list_files_operations_per_collection: usize,
+    /// Per-policy candidate limit; the deduplicated union can contain twice this many.
+    /// Execution remains bounded by max_collections_to_gc.
     pub(super) max_collections_to_fetch: Option<u32>,
     pub(super) gc_interval_mins: u32,
     #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]

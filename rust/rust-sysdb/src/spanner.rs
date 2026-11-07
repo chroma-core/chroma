@@ -35,6 +35,19 @@ use uuid::Uuid;
 
 use crate::config::{SpannerBackendConfig, SpannerConfig};
 
+/// Append deleted candidates, preserving policy order and selecting each collection once.
+fn merge_gc_candidates(
+    normal: Vec<chroma_proto::CollectionToGcInfo>,
+    deleted: Vec<chroma_proto::CollectionToGcInfo>,
+) -> Vec<chroma_proto::CollectionToGcInfo> {
+    let mut seen = HashSet::new();
+    normal
+        .into_iter()
+        .chain(deleted)
+        .filter(|candidate| seen.insert(candidate.id.clone()))
+        .collect()
+}
+
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
 fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
     let mut config = SessionConfig::default();
@@ -1770,6 +1783,21 @@ impl SpannerBackend {
         &self,
         req: ListCollectionsToGcRequest,
     ) -> Result<ListCollectionsToGcResponse, SysDbError> {
+        let normal = self
+            .list_gc_candidates(req.clone(), false)
+            .await?
+            .collections;
+        let deleted = self.list_gc_candidates(req, true).await?.collections;
+        Ok(ListCollectionsToGcResponse {
+            collections: merge_gc_candidates(normal, deleted),
+        })
+    }
+
+    async fn list_gc_candidates(
+        &self,
+        req: ListCollectionsToGcRequest,
+        deleted_only: bool,
+    ) -> Result<ListCollectionsToGcResponse, SysDbError> {
         let region = self.local_region();
 
         // GC typically starts from the latest version file. Empty MCMR
@@ -1796,6 +1824,10 @@ impl SpannerBackend {
             );
         }
 
+        if deleted_only {
+            where_clauses.push("c.is_deleted = TRUE".to_string());
+        }
+
         let where_clause = where_clauses.join(" AND ");
 
         let limit_clause = if req.limit.is_some() {
@@ -1804,6 +1836,11 @@ impl SpannerBackend {
             String::new()
         };
 
+        let ordering = if deleted_only {
+            "c.updated_at ASC, c.collection_id ASC"
+        } else {
+            "ccc.num_versions DESC, c.collection_id ASC"
+        };
         let query = format!(
             r#"
             SELECT
@@ -1816,7 +1853,7 @@ impl SpannerBackend {
             JOIN collection_compaction_cursors ccc
                 ON ccc.collection_id = c.collection_id AND ccc.region = @region
             WHERE {where_clause}
-            ORDER BY ccc.num_versions DESC
+            ORDER BY {ordering}
             {limit_clause}
             "#,
         );
@@ -9746,6 +9783,42 @@ pub mod tests {
                 assert!(msg.contains("not found"));
             }
             _ => panic!("Expected NotFound error, got: {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_gc_policy_union() {
+        fn candidates(ids: &[&str]) -> Vec<chroma_proto::CollectionToGcInfo> {
+            ids.iter()
+                .map(|id| chroma_proto::CollectionToGcInfo {
+                    id: (*id).to_string(),
+                    ..Default::default()
+                })
+                .collect()
+        }
+        let cases: &[(&[&str], &[&str], &[&str])] = &[
+            (
+                &["live-0", "live-1"],
+                &["old", "new"],
+                &["live-0", "live-1", "old", "new"],
+            ),
+            (
+                &["busy-deleted", "live"],
+                &["old", "busy-deleted", "new"],
+                &["busy-deleted", "live", "old", "new"],
+            ),
+            (&["a", "b"], &["a", "b"], &["a", "b"]),
+            (&[], &["old", "new"], &["old", "new"]),
+            (&["a", "b"], &[], &["a", "b"]),
+            (&[], &[], &[]),
+        ];
+        for (normal, deleted, expected) in cases {
+            let result = merge_gc_candidates(candidates(normal), candidates(deleted));
+            let ids: Vec<_> = result
+                .iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect();
+            assert_eq!(&ids, expected, "normal={normal:?}, deleted={deleted:?}");
         }
     }
 }
