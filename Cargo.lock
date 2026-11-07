@@ -2121,6 +2121,7 @@ dependencies = [
  "chroma-metrics",
  "chroma-types",
  "futures",
+ "httpmock",
  "object_store",
  "opentelemetry",
  "rand 0.8.5",
