@@ -20,7 +20,9 @@ jobs:
       matrix:
         registry: [ "https://registry.npmjs.org", "https://npm.pkg.github.com" ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    permissions: write-all
+    permissions:
+      contents: read
+      packages: write
     steps:
     - name: Resolve tag
       id: tag
@@ -95,6 +97,7 @@ jobs:
     if: failure()
     needs: [release]
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions: {}
     steps:
       - name: Resolve tag
         id: tag
