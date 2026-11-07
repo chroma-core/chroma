@@ -367,6 +367,8 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             if let Err(err) = pin.consume(&self.coordination, &mut state) {
                 let _ = work.tx.send(Err(err));
                 self.coordination.write_finished.notify_one();
+                drop(state);
+                self.coordination.write_finished.notify_waiters();
                 return;
             }
         }
@@ -392,11 +394,21 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
                 if !admission_predicate(&state.admission_metadata) {
                     let _ = work.tx.send(Err(Error::AdmissionRejected));
                     self.coordination.write_finished.notify_one();
+                    if is_pinned {
+                        drop(state);
+                        self.coordination.write_finished.notify_waiters();
+                    }
                     return;
                 }
             }
             state.admission_metadata.push(work.admission_metadata());
             state.enqueued.push(work);
+        }
+        drop(state);
+        if is_pinned {
+            // Waiters must see the released capacity and final admission state.  Rejections also
+            // free the consumed reservation.
+            self.coordination.write_finished.notify_waiters();
         }
     }
 
@@ -734,7 +746,11 @@ pub async fn upload_parquet(
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
 
     use chroma_storage::{s3_client_for_test_with_new_bucket, test_storage, PutOptions};
 
@@ -838,6 +854,28 @@ mod tests {
             ..LogWriterOptions::default()
         };
         BatchManager::new(options, NoopS3Uploader).unwrap()
+    }
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn poll_with_counter<F: Future>(
+        mut future: Pin<&mut F>,
+        counter: &Arc<WakeCounter>,
+    ) -> Poll<F::Output> {
+        let waker = Waker::from(Arc::clone(counter));
+        let mut context = Context::from_waker(&waker);
+        future.as_mut().poll(&mut context)
     }
 
     async fn enqueue(
@@ -1189,6 +1227,157 @@ mod tests {
 
         assert_eq!(*observed.lock().unwrap(), vec![Vec::<Vec<u8>>::new()]);
         assert_eq!(2, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn consuming_fragment_pin_wakes_all_fit_waiters_before_publication() {
+        let options = LogWriterOptions {
+            throttle_fragment: ThrottleOptions {
+                batch_size_bytes: 10,
+                throughput: 2_000_000,
+                batch_interval_us: 0,
+                ..ThrottleOptions::default()
+            },
+            ..LogWriterOptions::default()
+        };
+        let batch_manager =
+            BatchManager::<(FragmentSeqNo, LogPosition), _>::new(options.clone(), NoopS3Uploader)
+                .unwrap();
+        let held_pin = batch_manager.acquire_fragment_pin(1).await.unwrap();
+        let submitted_pin = batch_manager.acquire_fragment_pin(8).await.unwrap();
+
+        let first_waker = Arc::new(WakeCounter::default());
+        let second_waker = Arc::new(WakeCounter::default());
+        let mut first_waiter = Box::pin(batch_manager.acquire_fragment_pin(1));
+        let mut second_waiter = Box::pin(batch_manager.acquire_fragment_pin(1));
+        assert!(matches!(
+            poll_with_counter(first_waiter.as_mut(), &first_waker),
+            Poll::Pending
+        ));
+        assert!(matches!(
+            poll_with_counter(second_waiter.as_mut(), &second_waker),
+            Poll::Pending
+        ));
+        {
+            let state = batch_manager.coordination.state.lock().unwrap();
+            assert_eq!(2, state.fragment_pins);
+            assert_eq!(9, state.pinned_bytes);
+            assert_eq!(0, state.enqueued.len());
+            assert_eq!(0, state.writers_active);
+            assert!(!state.can_reserve(1, 10));
+        }
+
+        let mut append_rx = enqueue_s3_pinned_with_options(
+            &batch_manager,
+            "x",
+            AppendOptions::default(),
+            submitted_pin,
+        )
+        .await;
+        {
+            let state = batch_manager.coordination.state.lock().unwrap();
+            assert_eq!(1, state.fragment_pins);
+            assert_eq!(1, state.pinned_bytes);
+            assert_eq!(1, state.enqueued.len());
+            assert_eq!(2, state.occupied_bytes());
+            assert_eq!(0, state.writers_active);
+            assert!(state.can_reserve(2, 10));
+        }
+        let manifest = FixedS3ManifestPublisher {
+            assigned_fragment_start: LogPosition::default(),
+        };
+        assert!(batch_manager
+            .take_work(&manifest)
+            .await
+            .expect("the pinned generation must not fail selection")
+            .is_none());
+        assert!(matches!(
+            append_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        let first_wakes = first_waker.0.load(Ordering::SeqCst);
+        let second_wakes = second_waker.0.load(Ordering::SeqCst);
+        let first_result = poll_with_counter(first_waiter.as_mut(), &first_waker);
+        let second_result = poll_with_counter(second_waiter.as_mut(), &second_waker);
+        assert!(
+            first_wakes > 0 && second_wakes > 0,
+            "consuming the pin must wake both registered acquisitions before releasing the held pin (wakes: {first_wakes}, {second_wakes}; polls: {first_result:?}, {second_result:?})"
+        );
+        let first_waiter_pin = match first_result {
+            Poll::Ready(Ok(pin)) => pin,
+            Poll::Ready(Err(err)) => panic!("first waiter failed to acquire a pin: {err:?}"),
+            Poll::Pending => panic!("first waiter was not ready after its capacity wake"),
+        };
+        let second_waiter_pin = match second_result {
+            Poll::Ready(Ok(pin)) => pin,
+            Poll::Ready(Err(err)) => panic!("second waiter failed to acquire a pin: {err:?}"),
+            Poll::Pending => panic!("second waiter was not ready after its capacity wake"),
+        };
+        {
+            let state = batch_manager.coordination.state.lock().unwrap();
+            assert_eq!(3, state.fragment_pins);
+            assert_eq!(3, state.pinned_bytes);
+            assert_eq!(1, state.enqueued.len());
+            assert_eq!(0, state.writers_active);
+        }
+        assert!(batch_manager
+            .take_work(&manifest)
+            .await
+            .expect("the remaining pins must hold the generation")
+            .is_none());
+        assert!(matches!(
+            append_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        drop(first_waiter_pin);
+        drop(second_waiter_pin);
+        assert!(batch_manager
+            .take_work(&manifest)
+            .await
+            .expect("the held pin must continue holding the generation")
+            .is_none());
+        assert!(matches!(
+            append_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        drop(held_pin);
+        let work = assert_s3_work(take_s3_work(&batch_manager, 0).await, 0, None, &["x"]);
+        commit_s3_work(&batch_manager, LogPosition::default(), work).await;
+        expect_committed(append_rx, 0).await;
+
+        // Shutdown remains a separate wake source and must reject, not strand, blocked waiters.
+        let shutdown_manager =
+            BatchManager::<(FragmentSeqNo, LogPosition), _>::new(options, NoopS3Uploader).unwrap();
+        let shutdown_first_pin = shutdown_manager.acquire_fragment_pin(1).await.unwrap();
+        let shutdown_second_pin = shutdown_manager.acquire_fragment_pin(8).await.unwrap();
+        let shutdown_first_waker = Arc::new(WakeCounter::default());
+        let shutdown_second_waker = Arc::new(WakeCounter::default());
+        let mut shutdown_first_waiter = Box::pin(shutdown_manager.acquire_fragment_pin(1));
+        let mut shutdown_second_waiter = Box::pin(shutdown_manager.acquire_fragment_pin(1));
+        assert!(matches!(
+            poll_with_counter(shutdown_first_waiter.as_mut(), &shutdown_first_waker),
+            Poll::Pending
+        ));
+        assert!(matches!(
+            poll_with_counter(shutdown_second_waiter.as_mut(), &shutdown_second_waker),
+            Poll::Pending
+        ));
+        shutdown_manager.shutdown_prepare();
+        shutdown_manager.shutdown_finish();
+        assert!(shutdown_first_waker.0.load(Ordering::SeqCst) > 0);
+        assert!(shutdown_second_waker.0.load(Ordering::SeqCst) > 0);
+        assert!(matches!(
+            poll_with_counter(shutdown_first_waiter.as_mut(), &shutdown_first_waker),
+            Poll::Ready(Err(Error::LogContentionRetry))
+        ));
+        assert!(matches!(
+            poll_with_counter(shutdown_second_waiter.as_mut(), &shutdown_second_waker),
+            Poll::Ready(Err(Error::LogContentionRetry))
+        ));
+        drop(shutdown_first_pin);
+        drop(shutdown_second_pin);
     }
 
     #[tokio::test]
