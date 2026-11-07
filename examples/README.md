@@ -24,7 +24,7 @@ folder structure
 
 ### Basic Functionality
 - [x] Examples of using different embedding models
-- [x] Local persistance demo
+- [x] Local persistence demo
 - [x] Where filtering demo
 
 ### Advanced Functionality

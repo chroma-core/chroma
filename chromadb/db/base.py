@@ -111,7 +111,7 @@ _context = local()
 
 class ParameterValue(pypika.Parameter):  # type: ignore
     """
-    Wrapper class for PyPika paramters that allows the values for Parameters
+    Wrapper class for PyPika parameters that allows the values for Parameters
     to be expressed inline while building a query. See get_sql() for
     detailed usage information.
     """
