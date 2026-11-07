@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.config import System
+from chromadb.config import Settings, System
 from typing import Optional, Dict, Generator
 
 
@@ -178,3 +178,41 @@ def test_multiple_clients_returns_one_key() -> None:
     api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
 
     assert api_key in ["key-1", "key-2"]
+
+
+def test_release_removes_unreferenced_aliases_for_stopped_system() -> None:
+    system = MagicMock(spec=System)
+    system.settings = Settings(chroma_api_impl="chromadb.api.fastapi.FastAPI")
+    alias = SharedSystemClient._populate_data_from_system(system)
+    SharedSystemClient._identifier_to_system["client-id"] = system
+    SharedSystemClient._identifier_to_refcount["client-id"] = 1
+
+    SharedSystemClient._release_system("client-id")
+
+    assert SharedSystemClient._identifier_to_system == {}
+    assert SharedSystemClient._identifier_to_refcount == {}
+    assert alias not in SharedSystemClient._identifier_to_system
+    system.stop.assert_called_once()
+
+
+def test_release_keeps_aliases_while_system_has_an_active_identifier() -> None:
+    system = MagicMock(spec=System)
+    system.settings = Settings(chroma_api_impl="chromadb.api.fastapi.FastAPI")
+    alias = SharedSystemClient._populate_data_from_system(system)
+    SharedSystemClient._identifier_to_system["released-client"] = system
+    SharedSystemClient._identifier_to_system["active-client"] = system
+    SharedSystemClient._identifier_to_refcount["released-client"] = 1
+    SharedSystemClient._identifier_to_refcount["active-client"] = 1
+
+    SharedSystemClient._release_system("released-client")
+
+    assert SharedSystemClient._identifier_to_system == {"active-client": system}
+    assert alias not in SharedSystemClient._identifier_to_system
+    assert SharedSystemClient._identifier_to_refcount == {"active-client": 1}
+    system.stop.assert_not_called()
+
+    SharedSystemClient._release_system("active-client")
+
+    assert SharedSystemClient._identifier_to_system == {}
+    assert SharedSystemClient._identifier_to_refcount == {}
+    system.stop.assert_called_once()
