@@ -12,7 +12,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[cfg(feature = "pyo3")]
-use pyo3::{exceptions::PyValueError, types::PyAnyMethods};
+use pyo3::types::PyAnyMethods;
+
+#[cfg(feature = "pyo3")]
+use crate::InvalidArgumentError;
 
 // CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
@@ -196,7 +199,7 @@ impl Collection {
         match self.schema.as_ref() {
             Some(schema) => {
                 let schema_json = serde_json::to_string(schema)
-                    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+                    .map_err(|err| InvalidArgumentError::new_err(err.to_string()))?;
                 let res = pyo3::prelude::PyModule::import(py, "json")?
                     .getattr("loads")?
                     .call1((schema_json,))?;

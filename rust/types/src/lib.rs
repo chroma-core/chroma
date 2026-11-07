@@ -81,3 +81,6 @@ pub use where_parsing::*;
 pub mod chroma_proto {
     tonic::include_proto!("chroma");
 }
+
+#[cfg(feature = "pyo3")]
+pyo3::import_exception!(chromadb.errors, InvalidArgumentError);

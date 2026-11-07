@@ -16,6 +16,9 @@ use crate::chroma_proto;
 #[cfg(feature = "pyo3")]
 use pyo3::types::{PyAnyMethods, PyDictMethods};
 
+#[cfg(feature = "pyo3")]
+use crate::InvalidArgumentError;
+
 #[cfg(feature = "testing")]
 use proptest::prelude::*;
 
@@ -319,7 +322,7 @@ impl<'py> pyo3::FromPyObject<'py> for SparseVector {
             None => SparseVector::new(indices, values),
         };
 
-        result.map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+        result.map_err(|e| InvalidArgumentError::new_err(e.to_string()))
     }
 }
 
@@ -373,7 +376,7 @@ impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
         } else if let Ok(list) = ob.downcast::<PyList>() {
             // Empty lists are not allowed
             if list.is_empty()? {
-                return Err(pyo3::exceptions::PyValueError::new_err(
+                return Err(InvalidArgumentError::new_err(
                     "Empty lists are not allowed as metadata values",
                 ));
             }
@@ -389,12 +392,12 @@ impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
             } else if let Ok(arr) = list.extract::<Vec<String>>() {
                 Ok(UpdateMetadataValue::StringArray(arr))
             } else {
-                Err(pyo3::exceptions::PyTypeError::new_err(
+                Err(InvalidArgumentError::new_err(
                     "Cannot convert Python list to UpdateMetadataValue: mixed or unsupported element types",
                 ))
             }
         } else {
-            Err(pyo3::exceptions::PyTypeError::new_err(
+            Err(InvalidArgumentError::new_err(
                 "Cannot convert Python object to UpdateMetadataValue",
             ))
         }
@@ -699,7 +702,7 @@ impl<'py> pyo3::FromPyObject<'py> for MetadataValue {
         } else if let Ok(list) = ob.downcast::<PyList>() {
             // Empty lists are not allowed
             if list.is_empty()? {
-                return Err(pyo3::exceptions::PyValueError::new_err(
+                return Err(InvalidArgumentError::new_err(
                     "Empty lists are not allowed as metadata values",
                 ));
             }
@@ -715,12 +718,12 @@ impl<'py> pyo3::FromPyObject<'py> for MetadataValue {
             } else if let Ok(arr) = list.extract::<Vec<String>>() {
                 Ok(MetadataValue::StringArray(arr))
             } else {
-                Err(pyo3::exceptions::PyTypeError::new_err(
+                Err(InvalidArgumentError::new_err(
                     "Cannot convert Python list to MetadataValue: mixed or unsupported element types",
                 ))
             }
         } else {
-            Err(pyo3::exceptions::PyTypeError::new_err(
+            Err(InvalidArgumentError::new_err(
                 "Cannot convert Python object to MetadataValue",
             ))
         }
