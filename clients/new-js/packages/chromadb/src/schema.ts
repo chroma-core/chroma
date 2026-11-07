@@ -215,6 +215,15 @@ export class VectorIndexConfig {
   sourceKey: string | null;
   hnsw: ApiHnswIndexConfig | null;
   spann: ApiSpannIndexConfig | null;
+  /**
+   * The raw `{type: "known", name, config}` embedding-function config from
+   * the server, kept only when `embeddingFunction` could not be reconstructed
+   * locally (e.g. its package isn't installed). Re-serializing falls back to
+   * this instead of collapsing to `{type: "legacy"}`, so the original config
+   * survives a deserialize/serialize round-trip even when it can't be
+   * instantiated in this environment.
+   */
+  unresolvedEmbeddingFunctionConfig?: EmbeddingFunctionConfiguration | null;
 
   constructor(options: VectorIndexConfigOptions = {}) {
     this.space = options.space ?? null;
@@ -239,6 +248,8 @@ export class SparseVectorIndexConfig {
   embeddingFunction?: SparseEmbeddingFunction | null;
   sourceKey: string | null;
   bm25: boolean | null;
+  /** See VectorIndexConfig.unresolvedEmbeddingFunctionConfig. */
+  unresolvedEmbeddingFunctionConfig?: EmbeddingFunctionConfiguration | null;
 
   constructor(options: SparseVectorIndexConfigOptions = {}) {
     this.embeddingFunction = options.embeddingFunction;
@@ -378,9 +389,15 @@ const resolveEmbeddingFunctionName = (
 
 const prepareEmbeddingFunctionConfig = (
   fn: AnyEmbeddingFunction | null | undefined,
+  fallbackConfig?: EmbeddingFunctionConfiguration | null,
 ): EmbeddingFunctionConfiguration => {
   if (!fn) {
-    return { type: "legacy" };
+    // `fn` is unset either because none was ever configured, or because a
+    // `{type: "known", ...}` config couldn't be reconstructed locally (e.g.
+    // its package isn't installed). Only the latter has a fallback to
+    // preserve — collapsing it to `{type: "legacy"}` would silently and
+    // permanently discard the original config on the next round-trip.
+    return fallbackConfig ? cloneObject(fallbackConfig) : { type: "legacy" };
   }
 
   const name = resolveEmbeddingFunctionName(fn);
@@ -1072,7 +1089,10 @@ export class Schema {
   private serializeVectorConfig(config: VectorIndexConfig): JsonDict {
     const serialized: JsonDict = {};
     const embeddingFunction = config.embeddingFunction;
-    const efConfig = prepareEmbeddingFunctionConfig(embeddingFunction);
+    const efConfig = prepareEmbeddingFunctionConfig(
+      embeddingFunction,
+      config.unresolvedEmbeddingFunctionConfig,
+    );
     serialized["embedding_function"] = efConfig;
 
     let resolvedSpace = config.space ?? null;
@@ -1118,8 +1138,10 @@ export class Schema {
   ): JsonDict {
     const serialized: JsonDict = {};
     const embeddingFunction = config.embeddingFunction;
-    serialized["embedding_function"] =
-      prepareEmbeddingFunctionConfig(embeddingFunction);
+    serialized["embedding_function"] = prepareEmbeddingFunctionConfig(
+      embeddingFunction,
+      config.unresolvedEmbeddingFunctionConfig,
+    );
 
     if (config.sourceKey) {
       serialized.source_key = config.sourceKey;
@@ -1284,10 +1306,16 @@ export class Schema {
       spann: json.spann ? cloneObject(json.spann) : null,
     });
 
+    const efConfig = json.embedding_function as
+      | EmbeddingFunctionConfiguration
+      | undefined;
     config.embeddingFunction = await getEmbeddingFunction({
       client,
-      efConfig: json.embedding_function as EmbeddingFunctionConfiguration,
+      efConfig,
     });
+    if (!config.embeddingFunction && efConfig?.type === "known") {
+      config.unresolvedEmbeddingFunctionConfig = cloneObject(efConfig);
+    }
     if (!config.space && config.embeddingFunction?.defaultSpace) {
       config.space = config.embeddingFunction.defaultSpace();
     }
@@ -1304,11 +1332,11 @@ export class Schema {
       bm25: typeof json.bm25 === "boolean" ? json.bm25 : null,
     });
 
+    const efConfig = json.embedding_function as
+      | EmbeddingFunctionConfiguration
+      | undefined;
     const embeddingFunction =
-      (await getSparseEmbeddingFunction(
-        client,
-        json.embedding_function as EmbeddingFunctionConfiguration,
-      )) ??
+      (await getSparseEmbeddingFunction(client, efConfig)) ??
       (config.embeddingFunction as
         | SparseEmbeddingFunction
         | null
@@ -1316,6 +1344,9 @@ export class Schema {
       undefined;
 
     config.embeddingFunction = embeddingFunction ?? null;
+    if (!config.embeddingFunction && efConfig?.type === "known") {
+      config.unresolvedEmbeddingFunctionConfig = cloneObject(efConfig);
+    }
     return config;
   }
 
