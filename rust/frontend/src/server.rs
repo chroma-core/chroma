@@ -853,7 +853,10 @@ struct ListDatabasesParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of databases", body = ListDatabasesResponse),
+        // `ListDatabasesResponse` is a bare `Vec<Database>` alias; referencing
+        // the alias here collapsed into the shared `#/components/schemas/Vec`
+        // component (issue #7933), so spell out the element type instead.
+        (status = 200, description = "List of databases", body = Vec<chroma_types::Database>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -1159,7 +1162,10 @@ struct ListCollectionsParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of collections", body = ListCollectionsResponse),
+        // `ListCollectionsResponse` is a bare `Vec<Collection>` alias; like
+        // `ListDatabasesResponse` it collapsed into the shared
+        // `#/components/schemas/Vec` component (issue #7933).
+        (status = 200, description = "List of collections", body = Vec<Collection>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -4535,5 +4541,256 @@ mod tests {
             "multi-region databases do not support attached functions",
         )
         .await;
+    }
+
+    // ------------------------------------------------------------------
+    // OpenAPI response contract tests.
+    // Regression guard for https://github.com/chroma-core/chroma/issues/7933:
+    // `ListDatabasesResponse` and `ListCollectionsResponse` are both bare
+    // `Vec<...>` aliases, which collapsed into a single `#/components/schemas/Vec`
+    // component whose item schema (last alias registered) was then served for
+    // both endpoints.
+    // ------------------------------------------------------------------
+
+    /// Escapes a JSON Pointer reference token (`~` -> `~0`, `/` -> `~1`).
+    fn json_pointer_token(token: &str) -> String {
+        token.replace('~', "~0").replace('/', "~1")
+    }
+
+    /// Resolves a schema that may be a `$ref` into `#/components/schemas/*`
+    /// against the full OpenAPI document.
+    fn resolve_schema<'a>(
+        schema: &'a serde_json::Value,
+        openapi: &'a serde_json::Value,
+    ) -> &'a serde_json::Value {
+        if let Some(reference) = schema.get("$ref").and_then(|r| r.as_str()) {
+            let name = reference
+                .rsplit('/')
+                .next()
+                .expect("$ref must have a final path segment");
+            openapi
+                .pointer(&format!("/components/schemas/{}", json_pointer_token(name)))
+                .unwrap_or_else(|| panic!("unresolved schema $ref {reference}"))
+        } else {
+            schema
+        }
+    }
+
+    /// The 200-response JSON schema served for `GET {path}` in the OpenAPI doc.
+    fn ok_response_schema<'a>(openapi: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
+        openapi
+            .pointer(&format!(
+                "/paths/{}/get/responses/200/content/application~1json/schema",
+                json_pointer_token(path)
+            ))
+            .unwrap_or_else(|| panic!("no JSON 200 response schema served for GET {path}"))
+    }
+
+    fn type_matches(value: &serde_json::Value, type_name: &str) -> bool {
+        // Nullability semantics are not part of the contract under test.
+        if value.is_null() {
+            return true;
+        }
+        match type_name {
+            "object" => value.is_object(),
+            "array" => value.is_array(),
+            "string" => value.is_string(),
+            "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+            "number" => value.is_number(),
+            "boolean" => value.is_boolean(),
+            _ => true,
+        }
+    }
+
+    /// Validates `value` against the subset of JSON Schema the generated
+    /// OpenAPI document uses (`$ref`, `type`, `items`, `properties`, `required`,
+    /// `allOf`). With `strict`, objects must not carry properties the schema
+    /// does not describe — this is what pins each list endpoint to its own
+    /// element type instead of whichever `Vec` alias was registered last.
+    fn validate_against_schema(
+        value: &serde_json::Value,
+        schema: &serde_json::Value,
+        openapi: &serde_json::Value,
+        path: &str,
+        strict: bool,
+        errors: &mut Vec<String>,
+    ) {
+        let schema = resolve_schema(schema, openapi);
+        if let Some(all_of) = schema.get("allOf").and_then(|s| s.as_array()) {
+            for sub_schema in all_of {
+                validate_against_schema(value, sub_schema, openapi, path, strict, errors);
+            }
+        }
+        if let Some(type_spec) = schema.get("type") {
+            let matched = match type_spec {
+                serde_json::Value::String(name) => type_matches(value, name),
+                serde_json::Value::Array(names) => names
+                    .iter()
+                    .filter_map(|n| n.as_str())
+                    .any(|name| type_matches(value, name)),
+                _ => true,
+            };
+            if !matched {
+                errors.push(format!(
+                    "{path}: expected {type_spec}, got {}",
+                    value_type_name(value)
+                ));
+                return;
+            }
+        }
+        if let (Some(obj), Some(properties)) = (
+            value.as_object(),
+            schema.get("properties").and_then(|p| p.as_object()),
+        ) {
+            if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
+                for prop in required.iter().filter_map(|p| p.as_str()) {
+                    if !obj.contains_key(prop) {
+                        errors.push(format!("{path}: required property `{prop}` is missing"));
+                    }
+                }
+            }
+            for (key, prop_schema) in properties {
+                if let Some(prop_value) = obj.get(key) {
+                    validate_against_schema(
+                        prop_value,
+                        prop_schema,
+                        openapi,
+                        &format!("{path}.{key}"),
+                        false,
+                        errors,
+                    );
+                }
+            }
+            if strict {
+                for key in obj.keys() {
+                    if !properties.contains_key(key) {
+                        errors.push(format!(
+                            "{path}: property `{key}` is not described by the schema"
+                        ));
+                    }
+                }
+            }
+        }
+        if let (Some(items), Some(item_schema)) = (value.as_array(), schema.get("items")) {
+            for (index, item) in items.iter().enumerate() {
+                validate_against_schema(
+                    item,
+                    item_schema,
+                    openapi,
+                    &format!("{path}[{index}]"),
+                    strict,
+                    errors,
+                );
+            }
+        }
+    }
+
+    fn value_type_name(value: &serde_json::Value) -> &'static str {
+        match value {
+            serde_json::Value::Null => "null",
+            serde_json::Value::Bool(_) => "boolean",
+            serde_json::Value::Number(_) => "number",
+            serde_json::Value::String(_) => "string",
+            serde_json::Value::Array(_) => "array",
+            serde_json::Value::Object(_) => "object",
+        }
+    }
+
+    /// Asserts that a real `GET {path}` response body validates against the
+    /// 200-response schema the server serves for it in `/openapi.json`.
+    fn assert_response_matches_openapi_schema(
+        openapi: &serde_json::Value,
+        path: &str,
+        body: &serde_json::Value,
+    ) {
+        let schema = ok_response_schema(openapi, path);
+        let mut errors = Vec::new();
+        validate_against_schema(body, schema, openapi, "$response", true, &mut errors);
+        assert!(
+            errors.is_empty(),
+            "GET {path} response does not match its served OpenAPI schema (issue #7933):\n  {}\nbody: {body}\nschema: {schema}",
+            errors.join("\n  ")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_endpoint_openapi_schemas_match_actual_responses() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+        let client = Client::new();
+        let base = format!("http://localhost:{port}/api/v2/tenants/default_tenant/databases");
+
+        // Populate both endpoints so the real response bodies are non-empty.
+        client
+            .post(&base)
+            .json(&serde_json::json!({ "name": "openapi_contract_db" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        client
+            .post(format!("{base}/openapi_contract_db/collections"))
+            .json(&serde_json::json!({ "name": "openapi_contract_collection" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        let openapi: serde_json::Value = client
+            .get(format!("http://localhost:{port}/openapi.json"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        let databases: serde_json::Value = client
+            .get(&base)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_response_matches_openapi_schema(
+            &openapi,
+            "/api/v2/tenants/{tenant}/databases",
+            &databases,
+        );
+
+        let collections: serde_json::Value = client
+            .get(format!("{base}/openapi_contract_db/collections"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_response_matches_openapi_schema(
+            &openapi,
+            "/api/v2/tenants/{tenant}/databases/{database}/collections",
+            &collections,
+        );
+
+        // The two list endpoints must not share a response schema: each one's
+        // schema must be pinned to its own element type (the alias-collision
+        // root cause of issue #7933).
+        let databases_schema = ok_response_schema(&openapi, "/api/v2/tenants/{tenant}/databases");
+        let collections_schema = ok_response_schema(
+            &openapi,
+            "/api/v2/tenants/{tenant}/databases/{database}/collections",
+        );
+        assert_ne!(
+            databases_schema, collections_schema,
+            "list_databases and list_collections serve the same response schema"
+        );
     }
 }
