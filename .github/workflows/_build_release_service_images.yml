@@ -74,6 +74,9 @@ concurrency:
   group: build-service-images-${{ inputs.commit-sha || github.sha }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: blacksmith-16vcpu-ubuntu-2404

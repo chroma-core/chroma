@@ -25,6 +25,9 @@ env:
   PYTEST_ADDOPTS: "-p chromadb.test.pytest_inventory"
   CHROMA_TEST_INVENTORY_RUNNER: ${{ inputs.runner }}
 
+permissions:
+  contents: read
+
 jobs:
   build-rust-bindings:
     timeout-minutes: 90
