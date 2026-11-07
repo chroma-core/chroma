@@ -343,3 +343,23 @@ def test_rust_bindings_api_stop_closes_bindings() -> None:
     bindings.close.assert_called_once_with()
     assert hasattr(api, "bindings") is False
     assert api._running is False
+
+
+def test_client_api_declared_lifecycle() -> None:
+    """Verify ClientAPI declares close and context manager protocols for static typers."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    client: ClientAPI = chromadb.EphemeralClient()
+    assert hasattr(client, "close")
+    assert hasattr(client, "__enter__")
+    assert hasattr(client, "__exit__")
+
+    client.close()
+    client.clear_system_cache()
+
+    with chromadb.EphemeralClient() as c:
+        assert isinstance(c, ClientAPI)
+        assert c.heartbeat() > 0
+    c.clear_system_cache()
+
