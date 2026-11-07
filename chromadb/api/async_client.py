@@ -437,6 +437,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def _count(self, collection_id: UUID) -> int:
         return await self._server._count(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -444,6 +446,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         return await self._server._peek(
             collection_id=collection_id,
             n=n,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
