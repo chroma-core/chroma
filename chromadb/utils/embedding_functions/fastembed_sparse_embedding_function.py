@@ -66,7 +66,13 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 raise ValueError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
         self._model = SparseTextEmbedding(
-            model_name, cache_dir, threads, cuda, device_ids, lazy_load, **kwargs
+            model_name=model_name,
+            cache_dir=cache_dir,
+            threads=threads,
+            cuda=cuda,
+            device_ids=device_ids,
+            lazy_load=lazy_load,
+            **kwargs,
         )
 
     def __call__(self, input: Documents) -> SparseVectors:
