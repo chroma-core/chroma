@@ -13,7 +13,7 @@ runs:
         bin/get-logs.sh ${{ inputs.artifact-name }}.zip
       shell: bash
     - name: Upload logs as artifact
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: ${{ inputs.artifact-name }}
         path: "${{ inputs.artifact-name }}.zip"

@@ -18,17 +18,17 @@ runs:
   using: "composite"
   steps:
     - name: Log in to the Github Container registry
-      uses: docker/login-action@v2.1.0
+      uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a # v2.1.0
       if: ${{ inputs.ghcr-username != '' }}
       with:
         registry: ghcr.io
         username: ${{ inputs.ghcr-username }}
         password: ${{ inputs.ghcr-password }}
     - name: Login to DockerHub
-      uses: docker/login-action@v2.1.0
+      uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a # v2.1.0
       if: ${{ inputs.dockerhub-username != '' }}
       with:
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-password }}
     - name: Set up Blacksmith builder
-      uses: useblacksmith/setup-docker-builder@v1
+      uses: useblacksmith/setup-docker-builder@e4c1c000c95f9cc255f72940e9c56bcbd1239436 # v1

@@ -72,7 +72,7 @@ runs:
         # creating it. Fresh runner images may not have CNI installed yet.
         sudo mkdir -p /etc/cni/net.d
     - name: Start minikube
-      uses: medyagh/setup-minikube@latest
+      uses: medyagh/setup-minikube@e9e035a86bbc3caea26a450bd4dbf9d0c453682e # latest
       with:
         driver: none # uses Docker engine on host instead of Docker-in-Docker
         # minikube 1.39.0 fails to start the none driver on GitHub runners

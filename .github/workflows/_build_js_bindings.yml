@@ -18,14 +18,14 @@ jobs:
       run:
         working-directory: rust/js_bindings
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22.23.4"
           cache: pnpm
@@ -36,7 +36,7 @@ jobs:
           github-token: ${{ github.token }}
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -54,13 +54,13 @@ jobs:
         run: pnpm build --target x86_64-apple-darwin
         shell: bash
       - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: bindings-aarch64-apple-darwin
           path: rust/js_bindings/chromadb-js-bindings.darwin-arm64.node
           if-no-files-found: error
       - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: bindings-x86_64-apple-darwin
           path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
@@ -73,14 +73,14 @@ jobs:
       run:
         working-directory: rust/js_bindings
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22.23.4"
           cache: pnpm
@@ -91,7 +91,7 @@ jobs:
           github-token: ${{ github.token }}
           targets: x86_64-pc-windows-msvc
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -106,7 +106,7 @@ jobs:
         run: pnpm build --target x86_64-pc-windows-msvc
         shell: bash
       - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: bindings-x86_64-pc-windows-msvc
           path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
@@ -119,14 +119,14 @@ jobs:
       run:
         working-directory: rust/js_bindings
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22.23.4"
           cache: pnpm
@@ -144,7 +144,7 @@ jobs:
             g++-aarch64-linux-gnu \
             libc6-dev-arm64-cross
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -170,13 +170,13 @@ jobs:
         run: pnpm build --target x86_64-unknown-linux-gnu
         shell: bash
       - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: bindings-aarch64-unknown-linux-gnu
           path: rust/js_bindings/chromadb-js-bindings.linux-arm64-gnu.node
           if-no-files-found: error
       - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: bindings-x86_64-unknown-linux-gnu
           path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
@@ -192,14 +192,14 @@ jobs:
       - build-windows
       - build-linux
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22.23.4"
           cache: pnpm
@@ -207,7 +207,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: rust/js_bindings/artifacts
       - name: List downloads

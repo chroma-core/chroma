@@ -23,11 +23,11 @@ jobs:
                    "chromadb/test/distributed/test_conditional_transaction.py"]
     runs-on: "blacksmith-8vcpu-ubuntu-2404"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/python
         with:
           python-version: "3.12"
-      - uses: useblacksmith/setup-docker-builder@v1
+      - uses: useblacksmith/setup-docker-builder@e4c1c000c95f9cc255f72940e9c56bcbd1239436 # v1
       - uses: ./.github/actions/preload-default-onnx-model
       - uses: ./.github/actions/tilt
       - name: Test
@@ -47,7 +47,7 @@ jobs:
           artifact-name: "tilt-logs-${{ steps.create-artifact-name.outputs.artifact_name }}"
       - name: Send PagerDuty alert on failure
         if: ${{ failure() }}
-        uses: Entle/action-pagerduty-alert@0.2.0
+        uses: Entle/action-pagerduty-alert@e6ca54cd88948b8a50f5bb1071dfa5bdb149ce7e # 0.2.0
         with:
           pagerduty-integration-key: '${{ secrets.PAGERDUTY_INTEGRATION_KEY }}'
           pagerduty-dedup-key: distributed-test-failed-${{ matrix.test-globs}}
@@ -57,7 +57,7 @@ jobs:
     needs: test-cluster
     steps:
       - name: Merge
-        uses: actions/upload-artifact/merge@v7
+        uses: actions/upload-artifact/merge@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: cluster_test_logs
           pattern: cluster_logs_*
@@ -73,7 +73,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Generate runtime report
         continue-on-error: true
         uses: ./.github/actions/runtime-report
