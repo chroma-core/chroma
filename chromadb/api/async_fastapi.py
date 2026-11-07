@@ -1,8 +1,19 @@
 import asyncio
+import weakref
 from uuid import UUID
 import urllib.parse
 import orjson
-from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List
+from typing import (
+    Any,
+    Mapping,
+    Optional,
+    cast,
+    Tuple,
+    Sequence,
+    Dict,
+    List,
+    Set,
+)
 import logging
 import httpx
 from overrides import override
@@ -27,7 +38,6 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.utils.async_to_sync import async_to_sync
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.execution.expression.plan import Search
 
@@ -75,10 +85,17 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     # Mixing asyncio and threading in this manner usually discouraged, but
     # this gives a better user experience with practically no downsides.
     # https://github.com/encode/httpx/issues/2058
-    _clients: Dict[int, httpx.AsyncClient] = {}
+    # Clients are owned by the instance, and entries for closed event loops
+    # are evicted so they do not accumulate across asyncio.run() calls.
+    _clients: Dict[int, httpx.AsyncClient]
+    _loops: Dict[int, "weakref.ReferenceType[asyncio.AbstractEventLoop]"]
 
     def __init__(self, system: System):
         super().__init__(system)
+
+        self._clients = {}
+        self._loops = {}
+        self._cleanup_tasks: Set["asyncio.Task[None]"] = set()
 
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
@@ -98,7 +115,18 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self._get_client()
         return self
 
+    def _evict_closed_loops(self) -> None:
+        stale_keys = [
+            key
+            for key, loop_ref in list(self._loops.items())
+            if (loop := loop_ref()) is None or loop.is_closed()
+        ]
+        for key in stale_keys:
+            self._loops.pop(key, None)
+            self._clients.pop(key, None)
+
     async def _cleanup(self) -> None:
+        self._loops.clear()
         while len(self._clients) > 0:
             (_, client) = self._clients.popitem()
             await client.aclose()
@@ -109,12 +137,46 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @override
     def stop(self) -> None:
         super().stop()
+        # Clients bound to a closed loop cannot be closed from another loop,
+        # so drop them before closing the rest.
+        self._evict_closed_loops()
+        self._loops.clear()
+        clients = list(self._clients.values())
+        self._clients.clear()
+        if not clients:
+            return
 
-        @async_to_sync
-        async def sync_cleanup() -> None:
-            await self._cleanup()
+        async def _close_clients() -> None:
+            for client in clients:
+                await client.aclose()
 
-        sync_cleanup()
+        try:
+            running_loop: Optional[
+                asyncio.AbstractEventLoop
+            ] = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is not None and running_loop.is_running():
+            # async_to_sync would return an un-awaited coroutine here, so
+            # schedule the close on the running loop instead.
+            task = running_loop.create_task(_close_clients())
+            self._cleanup_tasks.add(task)
+            task.add_done_callback(self._cleanup_tasks.discard)
+        else:
+            created_new_loop = False
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    raise RuntimeError("Event loop is closed")
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                created_new_loop = True
+            try:
+                loop.run_until_complete(_close_clients())
+            finally:
+                if created_new_loop:
+                    loop.close()
 
     def _get_client(self) -> httpx.AsyncClient:
         # Ideally this would use anyio to be compatible with both
@@ -122,14 +184,23 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         # the current event loop.
         # We attempt to get the loop assuming the environment is asyncio, and
         # otherwise gracefully fall back to using a singleton client.
-        loop_hash = None
+        loop: Optional[asyncio.AbstractEventLoop] = None
         try:
             loop = asyncio.get_event_loop()
-            loop_hash = loop.__hash__()
+            if loop.is_closed():
+                loop = None
         except RuntimeError:
-            loop_hash = 0
+            loop = None
 
-        if loop_hash not in self._clients:
+        self._evict_closed_loops()
+        loop_hash = hash(loop) if loop is not None else 0
+
+        # A new loop can reuse the hash of a collected one, so also check the
+        # stored loop is this exact loop before reusing its client.
+        existing_loop = self._loops[loop_hash]() if loop_hash in self._loops else None
+        if loop_hash not in self._clients or (
+            loop is not None and existing_loop is not loop
+        ):
             headers = (self._settings.chroma_server_headers or {}).copy()
             headers["Content-Type"] = "application/json"
             headers["User-Agent"] = (
@@ -144,6 +215,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 verify=self._settings.chroma_server_ssl_verify or False,
                 limits=self.http_limits,
             )
+            if loop is not None:
+                self._loops[loop_hash] = weakref.ref(loop)
 
         return self._clients[loop_hash]
 

@@ -343,3 +343,57 @@ def test_rust_bindings_api_stop_closes_bindings() -> None:
     bindings.close.assert_called_once_with()
     assert hasattr(api, "bindings") is False
     assert api._running is False
+
+
+def _make_async_fastapi() -> "chromadb.api.async_fastapi.AsyncFastAPI":
+    from chromadb.api.async_fastapi import AsyncFastAPI
+
+    settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=8000,
+    )
+    system = System(settings)
+    with patch.object(AsyncFastAPI, "require", side_effect=[MagicMock(), MagicMock()]):
+        return AsyncFastAPI(system)
+
+
+def test_async_fastapi_evicts_closed_event_loops() -> None:
+    """Verify AsyncFastAPI does not accumulate httpx.AsyncClient instances across closed event loops."""
+    from chromadb.api.async_fastapi import AsyncFastAPI
+
+    api = _make_async_fastapi()
+
+    async def use_once() -> int:
+        api._get_client()
+        return len(api._clients)
+
+    for _ in range(5):
+        assert asyncio.run(use_once()) == 1
+
+    # Clients are owned by the instance, not shared on the class.
+    assert not hasattr(AsyncFastAPI, "_clients")
+    api.stop()
+    assert len(api._clients) == 0
+
+
+def test_async_fastapi_stop_inside_running_loop_closes_client() -> None:
+    """Verify AsyncFastAPI.stop() inside a running event loop closes clients without un-awaited coroutine warnings."""
+    import warnings
+
+    api = _make_async_fastapi()
+
+    async def run_and_stop() -> None:
+        client = api._get_client()
+        assert not client.is_closed
+        api.stop()
+        assert len(api._clients) == 0
+        await asyncio.sleep(0)
+        assert client.is_closed
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        asyncio.run(run_and_stop())
+
+    runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    assert len(runtime_warnings) == 0
