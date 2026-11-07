@@ -45,18 +45,28 @@ class Murmur3AbsHasher {
     constructor(private readonly seed = 0) { }
 
     private murmur3(key: string): number {
+        // MurmurHash3 is defined over bytes. Hashing the string's UTF-16 code
+        // units instead makes every token containing a character above U+00FF
+        // hash differently from the Python and Rust clients, which both hash
+        // UTF-8 bytes (mmh3.hash, and token.as_bytes() respectively). A term id
+        // is the term's identity in a shared sparse index, so that mismatch
+        // makes cross-client queries miss silently.
+        const bytes = new TextEncoder().encode(key);
+        const len = bytes.length;
+
         let h1 = this.seed >>> 0;
         const c1 = 0xcc9e2d51;
         const c2 = 0x1b873593;
-        const bytes = key.length - (key.length & 3);
+        const blocks = len - (len & 3);
 
         let i = 0;
-        while (i < bytes) {
+        while (i < blocks) {
             let k1 =
-                (key.charCodeAt(i) & 0xff) |
-                ((key.charCodeAt(i + 1) & 0xff) << 8) |
-                ((key.charCodeAt(i + 2) & 0xff) << 16) |
-                ((key.charCodeAt(i + 3) & 0xff) << 24);
+                (bytes[i] |
+                    (bytes[i + 1] << 8) |
+                    (bytes[i + 2] << 16) |
+                    (bytes[i + 3] << 24)) >>>
+                0;
             i += 4;
 
             k1 = Math.imul(k1, c1);
@@ -69,20 +79,20 @@ class Murmur3AbsHasher {
         }
 
         let k1 = 0;
-        switch (key.length & 3) {
+        switch (len & 3) {
             case 3:
-                k1 ^= (key.charCodeAt(i + 2) & 0xff) << 16;
+                k1 ^= bytes[i + 2] << 16;
             case 2:
-                k1 ^= (key.charCodeAt(i + 1) & 0xff) << 8;
+                k1 ^= bytes[i + 1] << 8;
             case 1:
-                k1 ^= key.charCodeAt(i) & 0xff;
+                k1 ^= bytes[i];
                 k1 = Math.imul(k1, c1);
                 k1 = (k1 << 15) | (k1 >>> 17);
                 k1 = Math.imul(k1, c2);
                 h1 ^= k1;
         }
 
-        h1 ^= key.length;
+        h1 ^= len;
         h1 ^= h1 >>> 16;
         h1 = Math.imul(h1, 0x85ebca6b);
         h1 ^= h1 >>> 13;
