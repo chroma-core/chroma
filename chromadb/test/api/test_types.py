@@ -1,4 +1,6 @@
 import pytest
+import threading
+import time
 from typing import List, cast, Dict, Any
 from chromadb.api.types import Documents, Image, Document, Embeddings
 from chromadb.utils.embedding_functions import (
@@ -103,3 +105,77 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+def test_default_embedding_function_reuses_onnx_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DefaultEmbeddingFunction should build ONNXMiniLM_L6_V2 once per process.
+
+    DefaultEmbeddingFunction is rebuilt from the collection configuration on
+    every operation, so the ONNX session must be cached outside the instance.
+    """
+    from chromadb.api import types as api_types
+    from chromadb.utils.embedding_functions import onnx_mini_lm_l6_v2
+
+    constructed: List[object] = []
+    valid_embeddings = random_embeddings()
+
+    class FakeONNXMiniLM_L6_V2:
+        def __init__(self) -> None:
+            constructed.append(self)
+
+        def __call__(self, input: Documents) -> Embeddings:
+            return valid_embeddings
+
+    monkeypatch.setattr(onnx_mini_lm_l6_v2, "ONNXMiniLM_L6_V2", FakeONNXMiniLM_L6_V2)
+    monkeypatch.setattr(api_types, "_default_onnx_ef", None, raising=False)
+
+    # A fresh DefaultEmbeddingFunction each time, as build_from_config does.
+    for _ in range(3):
+        api_types.DefaultEmbeddingFunction()(random_documents())
+
+    assert len(constructed) == 1
+
+
+def test_default_embedding_function_builds_once_under_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent callers on a cold cache must not each build a session.
+
+    A server starting up serves several requests before the first embed
+    finishes, which is exactly the window the cache is meant to close.
+    """
+    from chromadb.api import types as api_types
+    from chromadb.utils.embedding_functions import onnx_mini_lm_l6_v2
+
+    thread_count = 8
+    constructed: List[object] = []
+    valid_embeddings = random_embeddings()
+    start = threading.Barrier(thread_count)
+
+    class SlowFakeONNXMiniLM_L6_V2:
+        def __init__(self) -> None:
+            # Hold the window open so an unsynchronised check-then-set loses it.
+            time.sleep(0.05)
+            constructed.append(self)
+
+        def __call__(self, input: Documents) -> Embeddings:
+            return valid_embeddings
+
+    monkeypatch.setattr(
+        onnx_mini_lm_l6_v2, "ONNXMiniLM_L6_V2", SlowFakeONNXMiniLM_L6_V2
+    )
+    monkeypatch.setattr(api_types, "_default_onnx_ef", None, raising=False)
+
+    def call() -> None:
+        start.wait()
+        api_types.DefaultEmbeddingFunction()(random_documents())
+
+    threads = [threading.Thread(target=call) for _ in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(constructed) == 1
