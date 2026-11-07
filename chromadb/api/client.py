@@ -731,6 +731,7 @@ class Client(SharedSystemClient, ClientAPI):
         self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
 
+    @override
     def close(self) -> None:
         """Close the client and release all resources.
 
@@ -767,10 +768,12 @@ class Client(SharedSystemClient, ClientAPI):
         # Release our own reference; stops system if this was the last client
         SharedSystemClient._release_system(self._identifier)
 
+    @override
     def __enter__(self) -> "Client":
         """Context manager entry."""
         return self
 
+    @override
     def __exit__(
         self,
         exc_type: Optional[type[BaseException]],
