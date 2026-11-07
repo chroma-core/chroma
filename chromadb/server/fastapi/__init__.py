@@ -1510,7 +1510,15 @@ class FastAPI(Server):
 
         return nnresult
 
-    async def pre_flight_checks(self) -> Dict[str, Any]:
+    async def pre_flight_checks(self, request: Request) -> Dict[str, Any]:
+        await self.auth_request(
+            request.headers,
+            AuthzAction.GET,
+            None,
+            None,
+            None,
+        )
+
         def process_pre_flight_checks() -> Dict[str, Any]:
             return {
                 "max_batch_size": self._api.get_max_batch_size(),
