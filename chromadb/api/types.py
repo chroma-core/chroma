@@ -133,6 +133,22 @@ __all__ = [
     "validate_sparse_vectors",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
+
+# Hoisted out of the validation loops below. validate_metadata runs once per
+# record and inspects every key/value pair, so the tuple and list literals these
+# replace were being rebuilt on every value.
+_METADATA_VALUE_TYPES: Final = (str, int, float, type(None))
+_METADATA_LIST_ITEM_TYPES: Final = frozenset((str, int, float, bool))
+_METADATA_PLAIN_TYPES: Final = frozenset((str, int, float, bool, type(None)))
+_EMBEDDING_DTYPES: Final = frozenset(
+    (
+        np.dtype(np.float16),
+        np.dtype(np.float32),
+        np.dtype(np.float64),
+        np.dtype(np.int32),
+        np.dtype(np.int64),
+    )
+)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
@@ -278,14 +294,22 @@ def normalize_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
     if metadata is None:
         return metadata
 
-    normalized = {}
-    for key, value in metadata.items():
+    # Copy once and overwrite only the entries that need converting. Almost no
+    # metadata contains a sparse vector, so the common case is a single C-level
+    # dict copy rather than a Python loop that reinserts every key. The result is
+    # still a new dict, so callers keep the same isolation from their input.
+    # dict(metadata.items()) rather than metadata.copy() or dict(metadata):
+    # copy() on a dict subclass such as OrderedDict returns that subclass, while
+    # the original always built a plain dict; and dict(metadata) raises
+    # ValueError on a non-mapping where iterating .items() raises AttributeError,
+    # which callers may be relying on. Going through .items() keeps both.
+    normalized = dict(metadata.items())
+    # Reuse the captured plain dict: custom dict subclasses may return a one-shot
+    # iterator from .items().
+    for key, value in normalized.items():
         if isinstance(value, dict) and value.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
             # Convert dict format to SparseVector (validates via __post_init__)
             normalized[key] = SparseVector.from_dict(value)
-        else:
-            # Pass through (including existing SparseVector instances)
-            normalized[key] = value
 
     return normalized
 
@@ -1018,14 +1042,23 @@ def validate_ids(ids: IDs) -> IDs:
     if len(ids) == 0:
         raise ValueError(f"Expected IDs to be a non-empty list, got {len(ids)} IDs")
     seen = set()
-    dups = set()
+    seen_add = seen.add
     for id_ in ids:
         if not isinstance(id_, str):
             raise ValueError(f"Expected ID to be a str, got {id_}")
-        if id_ in seen:
-            dups.add(id_)
-        else:
-            seen.add(id_)
+        seen_add(id_)
+    if len(seen) != len(ids):
+        # Duplicates are the rare case, so only enumerate which ones repeated
+        # once the set size has already proved that some did.
+        counted = set()
+        dups = set()
+        for id_ in ids:
+            if id_ in counted:
+                dups.add(id_)
+            else:
+                counted.add(id_)
+    else:
+        dups = set()
     if dups:
         n_dups = len(dups)
         if n_dups < 10:
@@ -1059,7 +1092,7 @@ def _validate_metadata_list_value(key: str, value: list) -> None:
         first_type = bool
     for item in value:
         item_type = bool if isinstance(item, bool) else type(item)
-        if item_type is not first_type or item_type not in (str, int, float, bool):
+        if item_type is not first_type or item_type not in _METADATA_LIST_ITEM_TYPES:
             raise ValueError(
                 f"Expected metadata list value for key '{key}' to contain only str, int, float, or bool "
                 f"and all elements must be the same type, got {value}"
@@ -1087,6 +1120,12 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
+        # Nearly every value is a plain str, int, float, bool or None. Settling
+        # that with one set lookup skips the isinstance chain below. Subclasses
+        # deliberately miss this test and fall through to the original checks, so
+        # what is accepted is unchanged.
+        if type(value) in _METADATA_PLAIN_TYPES:
+            continue
         # Check if value is a SparseVector (validation happens in __post_init__)
         if isinstance(value, SparseVector):
             pass  # Already validated in SparseVector.__post_init__
@@ -1094,7 +1133,7 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             _validate_metadata_list_value(key, value)
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
-            value, (str, int, float, type(None))
+            value, _METADATA_VALUE_TYPES
         ):
             raise ValueError(
                 f"Expected metadata value to be a str, int, float, bool, SparseVector, list, or None, got {value} which is a {type(value).__name__}"
@@ -1379,11 +1418,13 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         raise ValueError(
             f"Expected embeddings to be a list with at least one item, got {len(embeddings)} embeddings"
         )
-    if not all([isinstance(e, np.ndarray) for e in embeddings]):
-        raise ValueError(
-            "Expected each embedding in the embeddings to be a numpy array, got "
-            f"{list(set([type(e).__name__ for e in embeddings]))}"
-        )
+    for e in embeddings:
+        if not isinstance(e, np.ndarray):
+            # The type summary is only worth building once we know we are raising.
+            raise ValueError(
+                "Expected each embedding in the embeddings to be a numpy array, got "
+                f"{list(set([type(e).__name__ for e in embeddings]))}"
+            )
     for i, embedding in enumerate(embeddings):
         if embedding.ndim == 0:
             raise ValueError(
@@ -1394,13 +1435,7 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
                 f"Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos {i}"
             )
 
-        if embedding.dtype not in [
-            np.float16,
-            np.float32,
-            np.float64,
-            np.int32,
-            np.int64,
-        ]:
+        if embedding.dtype not in _EMBEDDING_DTYPES:
             raise ValueError(
                 "Expected each value in the embedding to be a int or float, got an embedding with "
                 f"{embedding.dtype} - {embedding}"
