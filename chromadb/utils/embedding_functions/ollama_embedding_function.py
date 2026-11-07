@@ -2,7 +2,6 @@ from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any
 import numpy as np
-from urllib.parse import urlparse
 
 DEFAULT_MODEL_NAME = "chroma/all-minilm-l6-v2-f32"
 
@@ -40,10 +39,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         self.timeout = timeout
 
         # Adding this for backwards compatibility with the old version of the EF
-        self._base_url = url
-        if self._base_url.endswith("/api/embeddings"):
-            parsed_url = urlparse(url)
-            self._base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        self._base_url = url.removesuffix("/api/embeddings")
 
         self._client = Client(host=self._base_url, timeout=timeout)
 
