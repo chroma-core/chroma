@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::{hash::DefaultHasher, path::Path};
 use thiserror::Error;
 
-use crate::{ETag, PutOptions, StorageError};
+use crate::{ETag, GetIfModifiedResult, PutOptions, StorageError};
 
 #[derive(Debug, Error)]
 #[error("Local storage error")]
@@ -67,6 +67,19 @@ impl LocalStorage {
         let bytes = self.get(key).await?;
         let etag = Self::etag_for_bytes(&bytes);
         Ok((bytes, Some(etag)))
+    }
+
+    pub async fn get_if_modified(
+        &self,
+        key: &str,
+        e_tag: &ETag,
+    ) -> Result<GetIfModifiedResult, StorageError> {
+        let (bytes, current_e_tag) = self.get_with_e_tag(key).await?;
+        if current_e_tag.as_ref() == Some(e_tag) {
+            Ok(None)
+        } else {
+            Ok(Some((bytes, current_e_tag)))
+        }
     }
 
     pub async fn confirm_same(&self, _: &str, _: &ETag) -> Result<bool, StorageError> {
@@ -252,5 +265,43 @@ impl Configurable<StorageConfig> for LocalStorage {
             }
             _ => Err(Box::new(StorageConfigError::InvalidStorageConfig)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn get_if_modified_returns_only_changed_content() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let storage = LocalStorage::new(temp_dir.path().to_str().unwrap());
+        storage
+            .put_bytes("manifest.json", b"first", PutOptions::default())
+            .await
+            .unwrap();
+
+        let (first, first_e_tag) = storage.get_with_e_tag("manifest.json").await.unwrap();
+        let first_e_tag = first_e_tag.unwrap();
+        assert_eq!(first.as_slice(), b"first");
+        assert_eq!(
+            storage
+                .get_if_modified("manifest.json", &first_e_tag)
+                .await
+                .unwrap(),
+            None
+        );
+
+        storage
+            .put_bytes("manifest.json", b"second", PutOptions::default())
+            .await
+            .unwrap();
+        let (second, second_e_tag) = storage
+            .get_if_modified("manifest.json", &first_e_tag)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.as_slice(), b"second");
+        assert_ne!(second_e_tag.as_ref(), Some(&first_e_tag));
     }
 }

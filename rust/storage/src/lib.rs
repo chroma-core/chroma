@@ -24,6 +24,9 @@ pub use s3::{
     s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name, S3Storage,
 };
 
+/// The result of a conditional read. `None` means the object was not modified.
+pub type GetIfModifiedResult = Option<(Arc<Vec<u8>>, Option<ETag>)>;
+
 /// A StorageError captures all kinds of errors that can come from storage.
 //
 // This was borrowed from Apache Arrow's ObjectStore crate.
@@ -363,6 +366,29 @@ impl Storage {
                 admission_controlled_storage
                     .get_with_e_tag(key, options)
                     .await
+            }
+        }
+    }
+
+    /// Get `key` if its current ETag differs from `e_tag`.
+    ///
+    /// Returns `Ok(None)` when the object is unchanged. Object stores that
+    /// support conditional reads perform this check and fetch in one request.
+    pub async fn get_if_modified(
+        &self,
+        key: &str,
+        e_tag: &ETag,
+        options: GetOptions,
+    ) -> Result<GetIfModifiedResult, StorageError> {
+        match self {
+            Storage::S3(s3) => s3.get_if_modified(key, e_tag).await,
+            Storage::Object(obj) => obj
+                .get_if_modified(key, e_tag)
+                .await
+                .map(|result| result.map(|(bytes, e_tag)| (Vec::from(bytes).into(), Some(e_tag)))),
+            Storage::Local(local) => local.get_if_modified(key, e_tag).await,
+            Storage::AdmissionControlledS3(storage) => {
+                storage.get_if_modified(key, e_tag, options).await
             }
         }
     }
