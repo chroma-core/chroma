@@ -611,15 +611,13 @@ describe("embedding function null vs undefined handling", () => {
     const schema = new Schema();
     const providedEf = new DefaultSpaceCustomEmbeddingFunction("i_want_l2", 5);
 
-    try {
-      const collection = await client.createCollection({
+    await expect(
+      client.createCollection({
         name: "test_provided_over_schema",
         schema,
         embeddingFunction: providedEf,
-      });
-    } catch (error) {
-      expect(error).toBeDefined();
-    }
+      }),
+    ).rejects.toBeDefined();
   });
   test("it should use provided embedding function if no schema", async () => {
     const providedEf = new DefaultSpaceCustomEmbeddingFunction("i_want_l2", 5);
