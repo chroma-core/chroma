@@ -45,6 +45,31 @@ collection.query(
 )
 ```
 
+### Diversified results with MMR
+
+Python collections also support Maximal Marginal Relevance (MMR) with
+`.max_marginal_relevance_query`. MMR first fetches a larger candidate set, then
+selects results that balance relevance to the query with diversity among the
+returned records. This is useful for retrieval-augmented generation when ordinary
+nearest-neighbor results contain several near-duplicate chunks.
+
+```python
+results = collection.max_marginal_relevance_query(
+    query_texts=["how do I configure retries?"],
+    n_results=5,
+    fetch_k=40,
+    lambda_mult=0.5,
+)
+```
+
+`fetch_k` controls how many nearest-neighbor candidates Chroma fetches before
+reranking. It is clamped to at least `n_results`. Larger values give MMR more
+room to diversify, with more client-side reranking work.
+
+`lambda_mult` controls the trade-off from `0.0` to `1.0`. Use `1.0` for pure
+nearest-neighbor relevance, `0.0` for the strongest diversity after the first
+pick, and values around `0.5` as a balanced starting point.
+
 The `ids` argument lets you constrain the search only to records with the IDs from the provided list:
 
 ```python
