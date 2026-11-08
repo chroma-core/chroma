@@ -49,7 +49,10 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.model_name = model_name
 
-        if os.getenv("TOGETHER_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_TOGETHER_AI_API_KEY"
+            and os.getenv("TOGETHER_API_KEY") is not None
+        ):
             self.api_key_env_var = "TOGETHER_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var

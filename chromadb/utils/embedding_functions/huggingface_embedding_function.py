@@ -40,7 +40,10 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
             )
-        if os.getenv("HUGGINGFACE_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_HUGGINGFACE_API_KEY"
+            and os.getenv("HUGGINGFACE_API_KEY") is not None
+        ):
             self.api_key_env_var = "HUGGINGFACE_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var
@@ -166,7 +169,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         self.url = url
 
         self.api_key_env_var = api_key_env_var
-        if os.getenv("HUGGINGFACE_API_KEY") is not None:
+        if api_key_env_var is None and os.getenv("HUGGINGFACE_API_KEY") is not None:
             self.api_key_env_var = "HUGGINGFACE_API_KEY"
 
         if self.api_key_env_var is not None:

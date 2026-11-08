@@ -43,7 +43,10 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
             )
-        if os.getenv("COHERE_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_COHERE_API_KEY"
+            and os.getenv("COHERE_API_KEY") is not None
+        ):
             self.api_key_env_var = "COHERE_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var

@@ -81,7 +81,10 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 DeprecationWarning,
             )
 
-        if os.getenv("JINA_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_JINA_API_KEY"
+            and os.getenv("JINA_API_KEY") is not None
+        ):
             self.api_key_env_var = "JINA_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var
