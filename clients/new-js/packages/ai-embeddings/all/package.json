@@ -44,6 +44,7 @@
     "@chroma-core/jina": "workspace:^",
     "@chroma-core/mistral": "workspace:^",
     "@chroma-core/morph": "workspace:^",
+    "@chroma-core/orcarouter": "workspace:^",
     "@chroma-core/ollama": "workspace:^",
     "@chroma-core/openai": "workspace:^",
     "@chroma-core/together-ai": "workspace:^",

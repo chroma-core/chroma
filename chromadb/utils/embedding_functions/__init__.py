@@ -73,6 +73,9 @@ from chromadb.utils.embedding_functions.mistral_embedding_function import (
 from chromadb.utils.embedding_functions.morph_embedding_function import (
     MorphEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.orcarouter_embedding_function import (
+    OrcaRouterEmbeddingFunction,
+)
 from chromadb.utils.embedding_functions.nomic_embedding_function import (
     NomicEmbeddingFunction,
     NomicQueryConfig,
@@ -117,6 +120,7 @@ _all_classes: Set[str] = {
     "JinaEmbeddingFunction",
     "MistralEmbeddingFunction",
     "MorphEmbeddingFunction",
+    "OrcaRouterEmbeddingFunction",
     "NomicEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
@@ -160,6 +164,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "jina": JinaEmbeddingFunction,
     "mistral": MistralEmbeddingFunction,
     "morph": MorphEmbeddingFunction,
+    "orcarouter": OrcaRouterEmbeddingFunction,
     "nomic": NomicEmbeddingFunction,
     "voyageai": VoyageAIEmbeddingFunction,
     "onnx_mini_lm_l6_v2": ONNXMiniLM_L6_V2,
@@ -288,6 +293,7 @@ __all__ = [
     "JinaQueryConfig",
     "MistralEmbeddingFunction",
     "MorphEmbeddingFunction",
+    "OrcaRouterEmbeddingFunction",
     "NomicEmbeddingFunction",
     "NomicQueryConfig",
     "VoyageAIEmbeddingFunction",
