@@ -109,15 +109,17 @@ export class ChromaClient {
   /** @ignore */
   async init(): Promise<void> {
     if (!this._initPromise) {
-      if (this.authProvider !== undefined) {
-        await this.getUserIdentity();
-      }
+      this._initPromise = (async () => {
+        if (this.authProvider !== undefined) {
+          await this.getUserIdentity();
+        }
 
-      this._initPromise = validateTenantDatabase(
-        this._adminClient,
-        this.tenant,
-        this.database,
-      );
+        await validateTenantDatabase(
+          this._adminClient,
+          this.tenant,
+          this.database,
+        );
+      })();
     }
 
     return this._initPromise;
