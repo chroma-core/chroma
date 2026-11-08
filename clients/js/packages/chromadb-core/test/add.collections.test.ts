@@ -9,8 +9,6 @@ import { ChromaClient } from "../src/ChromaClient";
 import { ChromaNotFoundError } from "../src/Errors";
 
 describe("add collections", () => {
-  // connects to the unauthenticated chroma instance started in
-  // the global jest setup file.
   const client = new ChromaClient({
     path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
   });
@@ -31,7 +29,7 @@ describe("add collections", () => {
     });
     const count = await collection.count();
     expect(count).toBe(1);
-    var res = await collection.get({
+    const res = await collection.get({
       ids: id,
       include: [IncludeEnum.Embeddings],
     });
@@ -47,14 +45,14 @@ describe("add collections", () => {
     });
     const count = await collection.count();
     expect(count).toBe(3);
-    var res = await collection.get({
+    const res = await collection.get({
       include: [IncludeEnum.Embeddings],
     });
     expect(res.embeddings).toEqual(EMBEDDINGS);
   });
 
   if (!process.env.OPENAI_API_KEY) {
-    test.skip("it should add OpenAI embeddings", async () => {});
+    test.skip("it should add OpenAI embeddings", async () => { });
   } else {
     test("it should add OpenAI embeddings", async () => {
       const embedder = new OpenAIEmbeddingFunction({
@@ -68,11 +66,11 @@ describe("add collections", () => {
       await collection.add({ ids: IDS, embeddings: embeddings });
       const count = await collection.count();
       expect(count).toBe(3);
-      var res = await collection.get({
+      const res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
-      expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
+      expect(res.embeddings).toEqual(embeddings);
     });
     test("it should add OpenAI embeddings with dimensions", async () => {
       await client.reset();
@@ -89,12 +87,12 @@ describe("add collections", () => {
       await collection.add({ ids: IDS, embeddings: embeddings });
       const count = await collection.count();
       expect(count).toBe(3);
-      var res = await collection.get({
+      const res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
-      expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
-      expect(embeddings[0].length).toBe(64);
+      expect(res.embeddings).toEqual(embeddings);
+      expect(embeddings[0]).toHaveLength(64);
     });
     test("it should add OpenAI embeddings with dimensions not supporting old models", async () => {
       await client.reset();
@@ -102,23 +100,19 @@ describe("add collections", () => {
         openai_api_key: process.env.OPENAI_API_KEY || "",
         openai_embedding_dimensions: 64,
       });
-      const collection = await client.createCollection({
+      await client.createCollection({
         name: "test",
         embeddingFunction: embedder,
       });
 
-      try {
-        await embedder.generate(DOCUMENTS);
-      } catch (e: any) {
-        expect(e.message).toMatch(
-          "This model does not support specifying dimensions.",
-        );
-      }
+      await expect(embedder.generate(DOCUMENTS)).rejects.toThrow(
+        "This model does not support specifying dimensions.",
+      );
     });
   }
 
   if (!process.env.COHERE_API_KEY) {
-    test.skip("it should add Cohere embeddings", async () => {});
+    test.skip("it should add Cohere embeddings", async () => { });
   } else {
     test("it should add Cohere embeddings", async () => {
       const embedder = new CohereEmbeddingFunction({
@@ -133,16 +127,16 @@ describe("add collections", () => {
       await collection.add({ ids: IDS, embeddings: embeddings });
       const count = await collection.count();
       expect(count).toBe(3);
-      var res = await collection.get({
+      const res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
-      expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
+      expect(res.embeddings).toEqual(embeddings);
     });
   }
 
   if (!process.env.VOYAGE_API_KEY) {
-    test.skip("it should add VoyageAI embeddings", async () => {});
+    test.skip("it should add VoyageAI embeddings", async () => { });
   } else {
     test("it should add VoyageAI embeddings", async () => {
       const embedder = new VoyageAIEmbeddingFunction({
@@ -158,11 +152,11 @@ describe("add collections", () => {
       await collection.add({ ids: IDS, embeddings: embeddings });
       const count = await collection.count();
       expect(count).toBe(3);
-      var res = await collection.get({
+      const res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
-      expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
+      expect(res.embeddings).toEqual(embeddings);
     });
   }
 
@@ -190,11 +184,9 @@ describe("add collections", () => {
     const ids = IDS.concat(["test1"]);
     const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
-    try {
-      await collection.add({ ids, embeddings, metadatas });
-    } catch (e: any) {
-      expect(e.message).toMatch("duplicates");
-    }
+    await expect(
+      collection.add({ ids, embeddings, metadatas }),
+    ).rejects.toThrow("duplicates");
   });
 
   test("should error on empty embedding", async () => {
@@ -202,10 +194,8 @@ describe("add collections", () => {
     const ids = ["id1"];
     const embeddings = [[]];
     const metadatas = [{ test: "test1", float_value: 0.1 }];
-    try {
-      await collection.add({ ids, embeddings, metadatas });
-    } catch (e: any) {
-      expect(e.message).toMatch("got empty embedding at pos");
-    }
+    await expect(
+      collection.add({ ids, embeddings, metadatas }),
+    ).rejects.toThrow("got empty embedding at pos");
   });
 });
