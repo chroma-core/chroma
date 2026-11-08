@@ -172,6 +172,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             where=where,
             where_document=where_document,
             include=include,
+            limit=limit,
+            offset=offset,
         )
 
         get_results = await self._client._get(
@@ -191,6 +193,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         )
 
     async def peek(self, limit: int = 10) -> GetResult:
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise TypeError("limit must be a non-negative integer in peek.")
+        if limit < 0:
+            raise ValueError("limit must be a non-negative integer in peek.")
         """Get the first few results in the database up to limit
 
         Args:
