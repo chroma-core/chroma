@@ -236,6 +236,70 @@ def test_persistent_client_close() -> None:
         client2.clear_system_cache()
 
 
+def test_persistent_client_persist_directory_priority(monkeypatch) -> None:
+    """persist_directory resolution: explicit path > settings.persist_directory > default.
+
+    An empty-string ``persist_directory`` must fall back to "./chroma" (the
+    falsy check used across the #7277 fixes), not be kept as-is.
+
+    Everything runs inside temporary directories so the test leaves nothing
+    behind: the two explicit paths live in a TemporaryDirectory, and the two
+    "./chroma" cases run with the cwd pointed at one.
+    """
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    clients: list = []
+
+    def make(**kwargs: Any) -> "ClientAPI":
+        client = chromadb.PersistentClient(**kwargs)
+        clients.append(client)
+        return client
+
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            explicit_path = os.path.join(tmpdir, "explicit")
+            from_settings = os.path.join(tmpdir, "from_settings")
+
+            # Explicit path wins over a configured settings.persist_directory.
+            c1 = make(
+                path=explicit_path,
+                settings=Settings(persist_directory=from_settings),
+            )
+            assert c1.get_settings().persist_directory == explicit_path
+            assert c1.get_settings().is_persistent is True
+
+            # Non-empty settings.persist_directory is respected when path is omitted.
+            c2 = make(settings=Settings(persist_directory=from_settings))
+            assert c2.get_settings().persist_directory == from_settings
+
+            # Close while still inside the TemporaryDirectory scope: on
+            # Windows the SQLite handles must be released before cleanup.
+            c1.close()
+            c2.close()
+
+        # The empty-string and no-argument cases resolve to "./chroma" by
+        # definition, so run them with the cwd inside a temporary directory.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as cwd:
+            monkeypatch.chdir(cwd)
+
+            # Empty-string settings.persist_directory falls back to the default.
+            c3 = make(settings=Settings(persist_directory=""))
+            assert c3.get_settings().persist_directory == "./chroma"
+
+            # No path and no settings falls back to the default.
+            c4 = make()
+            assert c4.get_settings().persist_directory == "./chroma"
+
+            # Same Windows-release concern for the "./chroma" directory.
+            c3.close()
+            c4.close()
+    finally:
+        for c in clients:
+            c.close()
+            c.clear_system_cache()
+
+
 def test_persistent_client_context_manager() -> None:
     """Test that PersistentClient works as a context manager."""
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
