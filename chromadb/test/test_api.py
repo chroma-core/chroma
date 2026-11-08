@@ -3605,6 +3605,33 @@ class TestWhereFromDict:
 class TestRankFromDict:
     """Test Rank.from_dict() conversion."""
 
+    @pytest.mark.parametrize("query", ["quantum mechanics", "量子力学"])
+    def test_knn_text_query(self, query):
+        """Preserve text queries in rank round trips and dictionary searches."""
+        from chromadb import Knn, Search
+        from chromadb.execution.expression.operator import Rank
+
+        expected = Knn(query=query, limit=7, default=1.0, return_rank=True)
+        rank = Rank.from_dict(expected.to_dict())
+        assert rank.query == query
+        assert rank.to_dict() == expected.to_dict()
+        assert (
+            Search(rank={"$knn": {"query": query}}).to_dict()
+            == Search(rank=Knn(query=query)).to_dict()
+        )
+
+    def test_nested_text_query(self):
+        """Parse text KNN queries inside arithmetic rank expressions."""
+        from chromadb import Knn, Search
+        from chromadb.execution.expression.operator import Rank, Val
+
+        expected = Knn(query="hello world") * 0.5 + Val(1.0)
+        rank = Rank.from_dict(expected.to_dict())
+        assert rank.to_dict() == expected.to_dict()
+        assert (
+            Search(rank=expected.to_dict()).to_dict() == Search(rank=expected).to_dict()
+        )
+
     def test_val_conversion(self):
         """Test Val conversion."""
         from chromadb.execution.expression.operator import Rank, Val
@@ -3723,6 +3750,9 @@ class TestRankFromDict:
 
         with pytest.raises(TypeError, match="requires a number"):
             Rank.from_dict({"$val": "not a number"})
+
+        with pytest.raises(TypeError, match="got float"):
+            Rank.from_dict({"$knn": {"query": 1.0}})
 
 
 class TestLimitFromDict:
