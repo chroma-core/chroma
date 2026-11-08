@@ -1,11 +1,9 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from chromadb.base_types import SparseVector
 
 
 def normalize_sparse_vector(
-    indices: List[int], 
-    values: List[float],
-    labels: Optional[List[str]] = None
+    indices: List[int], values: List[float], labels: Optional[List[str]] = None
 ) -> SparseVector:
     """Normalize and create a SparseVector by sorting indices and values together.
 
@@ -27,6 +25,19 @@ def normalize_sparse_vector(
         ValueError: If values are not numeric
         ValueError: If labels is provided and has different length than indices
     """
+    # Check the lengths before zipping: zip() stops at the shortest iterable, so a
+    # mismatch would silently drop entries instead of raising.
+    if len(indices) != len(values):
+        raise ValueError(
+            f"indices and values must have the same length, "
+            f"got {len(indices)} indices and {len(values)} values"
+        )
+    if labels is not None and len(labels) != len(indices):
+        raise ValueError(
+            f"labels must have the same length as indices and values, "
+            f"got {len(labels)} labels and {len(indices)} indices"
+        )
+
     if not indices:
         return SparseVector(indices=[], values=[], labels=None)
 
@@ -35,15 +46,13 @@ def normalize_sparse_vector(
         sorted_triples = sorted(zip(indices, values, labels), key=lambda x: x[0])
         sorted_indices, sorted_values, sorted_labels = zip(*sorted_triples)
         return SparseVector(
-            indices=list(sorted_indices), 
+            indices=list(sorted_indices),
             values=list(sorted_values),
-            labels=list(sorted_labels)
+            labels=list(sorted_labels),
         )
     else:
         sorted_pairs = sorted(zip(indices, values), key=lambda x: x[0])
         sorted_indices, sorted_values = zip(*sorted_pairs)
         return SparseVector(
-            indices=list(sorted_indices), 
-            values=list(sorted_values),
-            labels=None
+            indices=list(sorted_indices), values=list(sorted_values), labels=None
         )
