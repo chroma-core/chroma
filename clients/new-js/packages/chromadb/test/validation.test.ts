@@ -1,5 +1,9 @@
 import { describe, expect, test } from "@jest/globals";
-import { validateMetadata } from "../src/utils";
+import {
+  validateBaseRecordSet,
+  validateDocuments,
+  validateMetadata,
+} from "../src/utils";
 
 describe("validateMetadata", () => {
   test("accepts scalar values", () => {
@@ -86,5 +90,46 @@ describe("validateMetadata", () => {
         scores: [1, 2, 3],
       }),
     ).not.toThrow();
+  });
+});
+
+describe("validateDocuments", () => {
+  test("accepts plain string documents", () => {
+    expect(() =>
+      validateDocuments({ documents: ["hello", "world"] }),
+    ).not.toThrow();
+  });
+
+  test("accepts null documents when nullable", () => {
+    expect(() =>
+      validateDocuments({ documents: ["hello", null], nullable: true }),
+    ).not.toThrow();
+  });
+
+  test("rejects embedded NUL bytes (#7388)", () => {
+    expect(() =>
+      validateDocuments({ documents: ["hello \u0000 world"] }),
+    ).toThrow(
+      "Document contains embedded NUL (U+0000) characters, " +
+        "which corrupt the full-text search index. " +
+        "Strip or replace NUL bytes before upserting.",
+    );
+  });
+
+  test("rejects a bare NUL character", () => {
+    expect(() => validateDocuments({ documents: ["\u0000"] })).toThrow(
+      "Document contains embedded NUL (U+0000) characters",
+    );
+  });
+
+  test("rejects NUL via record-set validation", () => {
+    expect(() =>
+      validateBaseRecordSet({
+        recordSet: {
+          embeddings: [[0.1, 0.2]],
+          documents: ["nul \u0000 doc"],
+        },
+      }),
+    ).toThrow("Document contains embedded NUL (U+0000) characters");
   });
 });

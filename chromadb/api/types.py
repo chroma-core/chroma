@@ -1453,6 +1453,13 @@ def validate_documents(documents: Documents, nullable: bool = False) -> None:
             continue
         if not is_document(document):
             raise ValueError(f"Expected document to be a str, got {document}")
+        # Reject embedded NUL bytes — they corrupt the FTS5 inverted index (#7388)
+        if "\x00" in document:
+            raise ValueError(
+                "Document contains embedded NUL (U+0000) characters, "
+                "which corrupt the full-text search index. "
+                "Strip or replace NUL bytes before upserting."
+            )
 
 
 def validate_images(images: Images) -> None:
