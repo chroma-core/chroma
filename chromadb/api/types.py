@@ -1453,6 +1453,11 @@ def validate_documents(documents: Documents, nullable: bool = False) -> None:
             continue
         if not is_document(document):
             raise ValueError(f"Expected document to be a str, got {document}")
+        if "\x00" in document:
+            raise ValueError(
+                "Expected document to not contain NUL characters (\\x00). "
+                "Embedded NUL bytes corrupt the full-text search index."
+            )
 
 
 def validate_images(images: Images) -> None:
