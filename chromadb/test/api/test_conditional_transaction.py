@@ -16,6 +16,7 @@ from chromadb.config import System
 from chromadb.errors import (
     BackoffError,
     ConditionalWriteConflictError,
+    InvalidArgumentError,
     StaleReadError,
 )
 from chromadb.types import Collection as CollectionModel
@@ -288,6 +289,51 @@ def test_http_conditional_commit_sends_read_set_without_replay() -> None:
     assert payload["read_token"] == 42
     assert payload["read_ids"] == ["absent", "present"]
     assert [operation["operation"] for operation in payload["operations"]] == ["add"]
+
+
+@pytest.mark.parametrize("limit, offset", [(1, None), (None, 1)])
+def test_http_conditional_window_does_not_prove_absence(
+    limit: Optional[int], offset: Optional[int]
+) -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+    payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["a", "b"],
+            "where": None,
+            "where_document": None,
+            "limit": limit,
+            "offset": offset,
+            "include": ["documents"],
+        },
+    )
+    transaction.record_get(payload, ["a" if limit else "b"], 42)
+
+    with pytest.raises(
+        InvalidArgumentError, match="requires a prior read proving the id is absent"
+    ):
+        transaction.buffer_add(
+            collection_id,
+            "tenant",
+            "database",
+            ["b" if limit else "a"],
+            [np.array([1.0], dtype=np.float32)],
+        )
+
+
+def test_http_conditional_window_preserves_prior_presence() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+    scope = (collection_id, "tenant", "database")
+    first = transaction.prepare_get(*scope, {"ids": ["a"]})
+    transaction.record_get(first, ["a"], 42)
+    window = transaction.prepare_get(*scope, {"ids": ["a", "b"], "offset": 1})
+    transaction.record_get(window, ["b"], 42)
+
+    transaction.buffer_update(*scope, ["a"], metadatas=[{"k": 1}])
 
 
 def test_http_conditional_commit_sends_write_only_upsert_without_reads() -> None:

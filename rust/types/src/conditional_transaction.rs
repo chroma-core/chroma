@@ -297,7 +297,7 @@ impl ConditionalTransactionState {
                 next_known_present.insert(id.clone());
                 next_known_absent.remove(id);
             }
-            if request.r#where.is_none() {
+            if request.r#where.is_none() && request.limit.is_none() && request.offset == 0 {
                 for id in ids {
                     if !returned_ids.contains(id.as_str()) {
                         next_known_absent.insert(id.clone());
@@ -911,6 +911,39 @@ mod tests {
         assert_eq!(state.read_ids(), &string_set(&["present", "absent"]));
         assert_eq!(state.known_present(), &string_set(&["present"]));
         assert_eq!(state.known_absent(), &string_set(&["absent"]));
+    }
+
+    #[test]
+    fn windowed_point_get_does_not_prove_absence() {
+        for (limit, offset) in [(Some(1), 0), (None, 1)] {
+            let mut state = ConditionalTransactionState::new();
+            let mut get = request(Some(vec!["a", "b"]), None, limit);
+            get.offset = offset;
+            let get = state.prepare_get_request(get).unwrap();
+            let returned = if limit.is_some() { "a" } else { "b" };
+            let omitted = if limit.is_some() { "b" } else { "a" };
+            state
+                .record_get_response(&get, &response(&[returned], 42))
+                .unwrap();
+
+            assert!(state.known_absent().is_empty());
+            assert!(state.buffer_add(add_request(&[omitted])).is_err());
+        }
+    }
+
+    #[test]
+    fn windowed_point_get_preserves_prior_presence() {
+        let mut state = ConditionalTransactionState::new();
+        record_point_read(&mut state, &["a"], &["a"]);
+        let mut get = request(Some(vec!["a", "b"]), None, None);
+        get.offset = 1;
+        let get = state.prepare_get_request(get).unwrap();
+        state
+            .record_get_response(&get, &response(&["b"], 42))
+            .unwrap();
+
+        assert_eq!(state.known_present(), &string_set(&["a", "b"]));
+        state.buffer_update(update_request(&["a"])).unwrap();
     }
 
     #[test]
