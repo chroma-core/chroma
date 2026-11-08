@@ -23,4 +23,4 @@ _What is the plan to instrument and monitor this change?_
 
 ## Documentation Changes
 
-_Are all docstrings for user-facing APIs updated if required? Do we need to make documentation changes in the [docs section](https://github.com/chroma-core/chroma/tree/main/docs/docs.trychroma.com)?_
+_Are all docstrings for user-facing APIs updated if required? Do we need to make documentation changes in the [docs section](https://github.com/chroma-core/chroma/tree/main/docs/mintlify)?_
