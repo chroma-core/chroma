@@ -9,6 +9,29 @@ This page is a list of common gotchas or issues and how to fix them.
 
 If you don't see your problem listed here, please also search the [Github Issues](https://github.com/chroma-core/chroma/issues).
 
+## Packaging Chroma with PyInstaller
+
+PyInstaller may miss Chroma modules that are loaded dynamically at runtime. If a packaged local app fails with an error such as `ModuleNotFoundError: No module named 'chromadb.api.rust'` or another `chromadb.*` module, configure PyInstaller to collect Chroma submodules:
+
+```bash
+pyinstaller --collect-submodules chromadb your_app.py
+```
+
+If your app uses optional dependencies, such as a specific embedding provider or telemetry package, you may also need to add those packages to your PyInstaller spec file's `hiddenimports`.
+
+Custom embedding functions must also match Chroma's embedding function interface. Define `__call__` with an `input` parameter rather than `*args` or `**kwargs`:
+
+```python
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+
+
+class MyEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __call__(self, input: Documents) -> Embeddings:
+        return embed_documents(input)
+```
+
+See [#4092](https://github.com/chroma-core/chroma/issues/4092) for more context on PyInstaller packaging issues with local Chroma apps.
+
 ## Chroma JS-Client failures on NextJS projects
 
 Our default embedding function uses @huggingface/transformers, which depends on binaries that NextJS fails to bundle. If you are running into this issue, you can wrap your `nextConfig` (in `next.config.ts`) with the `withChroma` plugin, which will add the required settings to overcome the bundling issues.
