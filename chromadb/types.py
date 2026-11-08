@@ -130,7 +130,7 @@ class Collection(
         # For the model attributes we allow the user to access them directly
         if key == "configuration":
             self.set_configuration(value)
-        if key in self.get_model_fields():
+        elif key in self.get_model_fields():
             setattr(self, key, value)
         else:
             raise KeyError(
