@@ -15,7 +15,7 @@ The basic flow is as follows:
 
 ## Running the example
 
-You will need an Google API key to run this demo.
+You will need a Google API key to run this demo. Export it as the `GEMINI_API_KEY` environment variable, or you will be prompted for it when running the scripts.
 
 Install dependencies and run the example:
 
