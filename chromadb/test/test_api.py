@@ -2,6 +2,7 @@
 import os
 import shutil
 import sys
+import unittest.mock
 import tempfile
 import traceback
 from datetime import datetime, timedelta
@@ -1443,6 +1444,36 @@ def test_get_version(client):
     import re
 
     assert re.match(r"\d+\.\d+\.\d+", version)
+
+
+def test_version_compatibility_match_no_warning():
+    """No warning when client and server major.minor versions match."""
+    from chromadb import __version__
+    from chromadb.api.fastapi import FastAPI
+    import warnings
+
+    instance = FastAPI.__new__(FastAPI)
+    with unittest.mock.patch.object(FastAPI, "_make_request", return_value=__version__):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            instance._check_version_compatibility()
+            version_warnings = [x for x in w if "does not match server version" in str(x.message)]
+            assert len(version_warnings) == 0
+
+
+def test_version_compatibility_mismatch_warns():
+    """Warning is emitted when client and server major.minor versions differ."""
+    from chromadb.api.fastapi import FastAPI
+    import warnings
+
+    instance = FastAPI.__new__(FastAPI)
+    with unittest.mock.patch.object(FastAPI, "_make_request", return_value="0.0.1"):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            instance._check_version_compatibility()
+            version_warnings = [x for x in w if "does not match server version" in str(x.message)]
+            assert len(version_warnings) == 1
+            assert "0.0.1" in str(version_warnings[0].message)
 
 
 # test delete_collection
