@@ -48,6 +48,30 @@ prefer a server-backed Chroma instance.
 </ParamField>
 
 
+### AsyncPersistentClient
+
+Create an async persistent client that stores data on disk.
+
+This client is intended for local development and testing. For production,
+prefer a server-backed Chroma instance.
+
+<ParamField path="path" type="Union[str, Path]">
+  Directory to store persisted data.
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]">
+  Optional settings to override defaults.
+</ParamField>
+
+<ParamField path="tenant" type="str">
+  Tenant name to use for requests.
+</ParamField>
+
+<ParamField path="database" type="str">
+  Database name to use for requests.
+</ParamField>
+
+
 ### HttpClient
 
 Create a client that connects to a Chroma server.

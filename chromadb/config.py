@@ -54,6 +54,14 @@ _legacy_config_values = {
 }
 
 
+# Map each Chroma API implementation to the async implementation serving the
+# same storage, for Settings.chroma_async_api_impl.
+_async_api_impls: Dict[str, str] = {
+    "chromadb.api.async_fastapi.AsyncFastAPI": "chromadb.api.async_fastapi.AsyncFastAPI",
+    "chromadb.api.fastapi.FastAPI": "chromadb.api.async_fastapi.AsyncFastAPI",
+    "chromadb.api.rust.RustBindingsAPI": "chromadb.api.async_rust.AsyncRustBindingsAPI",
+}
+
 # Map specific abstract types to the setting which specifies which
 # concrete implementation to use.
 # Please keep these sorted. We're civilized people.
@@ -63,7 +71,7 @@ _abstract_type_keys: Dict[str, str] = {
     # NOTE: this is to support legacy api construction. Use ServerAPI instead
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.api.ServerAPI": "chroma_api_impl",
-    "chromadb.api.async_api.AsyncServerAPI": "chroma_api_impl",
+    "chromadb.api.async_api.AsyncServerAPI": "chroma_async_api_impl",
     "chromadb.auth.ClientAuthProvider": "chroma_client_auth_provider",
     "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
     "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
@@ -117,6 +125,7 @@ class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
+    # The async implementation is derived from this -- see chroma_async_api_impl.
     chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
 
     chroma_server_nofile: Optional[int] = None
@@ -301,6 +310,20 @@ class Settings(BaseSettings):  # type: ignore
     # =======
     # Methods
     # =======
+
+    @property
+    def chroma_async_api_impl(self) -> str:
+        """The async implementation serving the same storage as chroma_api_impl.
+
+        Derived, not stored: a sync and an async client on one persist
+        directory must produce equal Settings to share a System, and selecting
+        the async HTTP impl through chroma_api_impl -- which predates this --
+        must not fall back to local storage.
+        """
+        api_impl = self.require("chroma_api_impl")
+        if api_impl not in _async_api_impls:
+            raise ValueError(f"No async Chroma API implementation for {api_impl}")
+        return _async_api_impls[api_impl]
 
     def require(self, key: str) -> Any:
         """Return the value of a required config key, or raise an exception if it is not
