@@ -27,8 +27,8 @@ use chroma_types::{
     UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
-    Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, LikeExpr, OnConflict, Query,
-    SimpleExpr, SqliteQueryBuilder, UpdateStatement,
+    Alias, CommonTableExpression, DeleteStatement, Expr, ExprTrait, Func, InsertStatement,
+    LikeExpr, OnConflict, Query, SimpleExpr, SqliteQueryBuilder, UnionType, UpdateStatement,
 };
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, Sqlite, Transaction};
@@ -905,34 +905,35 @@ impl SqliteMetadataReader {
 
     /// Accumulate an exploded array element into the metadata map.
     ///
-    /// Column layout: 0=id, 1=key, 2=string_value, 3=int_value, 4=float_value, 5=bool_value
+    /// Column layout: 0=id, 1=embedding_id, 2=key, 3=string_value,
+    /// 4=int_value, 5=float_value, 6=bool_value, 7=is_array
     fn accumulate_array_value(
         metadata: &mut HashMap<String, MetadataValue>,
         key: &str,
         row: &sqlx::sqlite::SqliteRow,
     ) -> Result<(), SqliteMetadataError> {
-        if let Ok(Some(s)) = row.try_get::<Option<String>, _>(2) {
+        if let Ok(Some(s)) = row.try_get::<Option<String>, _>(3) {
             match metadata.get_mut(key) {
                 Some(MetadataValue::StringArray(arr)) => arr.push(s),
                 _ => {
                     metadata.insert(key.to_string(), MetadataValue::StringArray(vec![s]));
                 }
             }
-        } else if let Ok(Some(i)) = row.try_get::<Option<i64>, _>(3) {
+        } else if let Ok(Some(i)) = row.try_get::<Option<i64>, _>(4) {
             match metadata.get_mut(key) {
                 Some(MetadataValue::IntArray(arr)) => arr.push(i),
                 _ => {
                     metadata.insert(key.to_string(), MetadataValue::IntArray(vec![i]));
                 }
             }
-        } else if let Ok(Some(f)) = row.try_get::<Option<f64>, _>(4) {
+        } else if let Ok(Some(f)) = row.try_get::<Option<f64>, _>(5) {
             match metadata.get_mut(key) {
                 Some(MetadataValue::FloatArray(arr)) => arr.push(f),
                 _ => {
                     metadata.insert(key.to_string(), MetadataValue::FloatArray(vec![f]));
                 }
             }
-        } else if let Ok(Some(b)) = row.try_get::<Option<bool>, _>(5) {
+        } else if let Ok(Some(b)) = row.try_get::<Option<bool>, _>(6) {
             match metadata.get_mut(key) {
                 Some(MetadataValue::BoolArray(arr)) => arr.push(b),
                 _ => {
@@ -1039,7 +1040,13 @@ impl SqliteMetadataReader {
                 (alias.clone(), Embeddings::Id),
                 (alias.clone(), Embeddings::EmbeddingId),
             ])
-            .from_subquery(filter_limit_query, alias.clone());
+            .from(alias.clone())
+            .with_cte(
+                CommonTableExpression::new()
+                    .table_name(alias.clone())
+                    .query(filter_limit_query)
+                    .to_owned(),
+            );
 
         if document || metadata {
             projection_query
@@ -1058,6 +1065,37 @@ impl SqliteMetadataReader {
                     ]
                     .map(|c| (EmbeddingMetadata::Table, c)),
                 );
+        }
+
+        if metadata {
+            // Reuse the filtered, paginated records in one statement. Binding
+            // their IDs in a second query exceeds SQLite's variable limit for
+            // large reads and can observe metadata from a different snapshot.
+            projection_query.expr(Expr::val(false));
+            let array_projection = Query::select()
+                .columns([
+                    (alias.clone(), Embeddings::Id),
+                    (alias.clone(), Embeddings::EmbeddingId),
+                ])
+                .columns(
+                    [
+                        EmbeddingMetadataArray::Key,
+                        EmbeddingMetadataArray::StringValue,
+                        EmbeddingMetadataArray::IntValue,
+                        EmbeddingMetadataArray::FloatValue,
+                        EmbeddingMetadataArray::BoolValue,
+                    ]
+                    .map(|c| (EmbeddingMetadataArray::Table, c)),
+                )
+                .expr(Expr::val(true))
+                .from(alias.clone())
+                .inner_join(
+                    EmbeddingMetadataArray::Table,
+                    Expr::col((alias, Embeddings::Id))
+                        .equals((EmbeddingMetadataArray::Table, EmbeddingMetadataArray::Id)),
+                )
+                .to_owned();
+            projection_query.union(UnionType::All, array_projection);
         }
 
         let (sql, values) = projection_query.build_sqlx(SqliteQueryBuilder);
@@ -1080,51 +1118,18 @@ impl SqliteMetadataReader {
 
             if document || metadata {
                 if let Ok(key) = row.try_get::<String, _>(2) {
-                    if let Some(metadata) = record.metadata.as_mut() {
-                        if let Ok(Some(s)) = row.try_get(3) {
-                            metadata.insert(key.clone(), MetadataValue::Str(s));
+                    if let Some(record_metadata) = record.metadata.as_mut() {
+                        if metadata && row.try_get::<bool, _>(7)? {
+                            Self::accumulate_array_value(record_metadata, &key, &row)?;
+                        } else if let Ok(Some(s)) = row.try_get(3) {
+                            record_metadata.insert(key.clone(), MetadataValue::Str(s));
                         } else if let Ok(Some(i)) = row.try_get(4) {
-                            metadata.insert(key.clone(), MetadataValue::Int(i));
+                            record_metadata.insert(key.clone(), MetadataValue::Int(i));
                         } else if let Ok(Some(f)) = row.try_get(5) {
-                            metadata.insert(key.clone(), MetadataValue::Float(f));
+                            record_metadata.insert(key.clone(), MetadataValue::Float(f));
                         } else if let Ok(Some(b)) = row.try_get(6) {
-                            metadata.insert(key, MetadataValue::Bool(b));
+                            record_metadata.insert(key, MetadataValue::Bool(b));
                         }
-                    }
-                }
-            }
-        }
-
-        // Fetch array metadata from the separate array table and merge
-        // into the records we already have.
-        if metadata && !records.is_empty() {
-            let offset_ids: Vec<u32> = records.keys().copied().collect();
-            let (arr_sql, arr_vals) = Query::select()
-                .columns([
-                    EmbeddingMetadataArray::Id,
-                    EmbeddingMetadataArray::Key,
-                    EmbeddingMetadataArray::StringValue,
-                    EmbeddingMetadataArray::IntValue,
-                    EmbeddingMetadataArray::FloatValue,
-                    EmbeddingMetadataArray::BoolValue,
-                ])
-                .from(EmbeddingMetadataArray::Table)
-                .and_where(
-                    Expr::col(EmbeddingMetadataArray::Id)
-                        .is_in(offset_ids.iter().copied().map(|id| id as i64)),
-                )
-                .build_sqlx(SqliteQueryBuilder);
-
-            let arr_rows = sqlx::query_with(&arr_sql, arr_vals)
-                .fetch_all(self.db.get_conn())
-                .await?;
-
-            for row in arr_rows {
-                let offset_id: u32 = row.try_get(0)?;
-                let key: String = row.try_get(1)?;
-                if let Some(record) = records.get_mut(&offset_id) {
-                    if let Some(md) = record.metadata.as_mut() {
-                        Self::accumulate_array_value(md, &key, &row)?;
                     }
                 }
             }
@@ -1638,6 +1643,146 @@ mod tests {
                 metadata: true,
             },
         }
+    }
+
+    #[tokio::test]
+    async fn test_get_metadata_above_sqlite_variable_limit() {
+        let logs = (0..33_000)
+            .map(|i| {
+                let mut metadata =
+                    HashMap::from([("position".to_string(), UpdateMetadataValue::Int(i))]);
+                if matches!(i, 0 | 16_500 | 32_999) {
+                    metadata.insert(
+                        "tags".to_string(),
+                        UpdateMetadataValue::StringArray(vec!["large-read".to_string()]),
+                    );
+                }
+                LogRecord {
+                    log_offset: i,
+                    record: OperationRecord {
+                        id: format!("id-{i}"),
+                        metadata: Some(metadata),
+                        document: None,
+                        operation: Operation::Add,
+                        embedding: None,
+                        encoding: None,
+                    },
+                }
+            })
+            .collect();
+        let (reader, cas) = setup_with_logs(logs).await;
+        let result = reader
+            .get(make_get_plan(&cas, None))
+            .await
+            .expect("metadata projection must not bind one parameter per result");
+
+        assert_eq!(result.result.records.len(), 33_000);
+        for (i, record) in result.result.records.iter().enumerate() {
+            assert_eq!(record.id, format!("id-{i}"));
+            let metadata = record.metadata.as_ref().expect("metadata");
+            assert_eq!(
+                metadata.get("position"),
+                Some(&MetadataValue::Int(i as i64))
+            );
+            if matches!(i, 0 | 16_500 | 32_999) {
+                assert_eq!(
+                    metadata.get("tags"),
+                    Some(&MetadataValue::StringArray(vec!["large-read".to_string()]))
+                );
+            } else {
+                assert!(!metadata.contains_key("tags"));
+            }
+        }
+
+        let mut page = make_get_plan(
+            &cas,
+            Some(Where::Metadata(MetadataExpression {
+                key: "position".to_string(),
+                comparison: MetadataComparison::Primitive(
+                    PrimitiveOperator::GreaterThanOrEqual,
+                    MetadataValue::Int(16_499),
+                ),
+            })),
+        );
+        page.limit = Limit {
+            offset: 1,
+            limit: Some(2),
+        };
+        let result = reader.get(page).await.expect("filtered metadata page");
+        assert_eq!(result.result.records.len(), 2);
+        assert_eq!(result.result.records[0].id, "id-16500");
+        assert_eq!(result.result.records[1].id, "id-16501");
+        assert_eq!(
+            result.result.records[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .get("tags"),
+            Some(&MetadataValue::StringArray(vec!["large-read".to_string()]))
+        );
+        assert!(!result.result.records[1]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .contains_key("tags"));
+    }
+
+    #[tokio::test]
+    async fn test_get_metadata_uses_one_snapshot() {
+        let log = |version| LogRecord {
+            log_offset: version,
+            record: OperationRecord {
+                id: "id".to_string(),
+                metadata: Some(HashMap::from([
+                    ("version".to_string(), UpdateMetadataValue::Int(version)),
+                    (
+                        "versions".to_string(),
+                        UpdateMetadataValue::IntArray(vec![version, version]),
+                    ),
+                ])),
+                document: None,
+                operation: Operation::Upsert,
+                embedding: None,
+                encoding: None,
+            },
+        };
+        let (reader, cas) = setup_with_logs(vec![log(0)]).await;
+        let writer = SqliteMetadataWriter {
+            db: reader.db.clone(),
+        };
+        let writes = async {
+            for version in 1..=100 {
+                let mut tx = writer.begin().await.expect("begin update");
+                writer
+                    .apply_logs(
+                        Chunk::new(vec![log(version)].into()),
+                        cas.metadata_segment.id,
+                        cas.collection.schema.clone(),
+                        &mut *tx,
+                    )
+                    .await
+                    .expect("update both metadata tables");
+                tx.commit().await.expect("commit update");
+            }
+        };
+        let reads = async {
+            for _ in 0..100 {
+                let result = reader
+                    .get(make_get_plan(&cas, None))
+                    .await
+                    .expect("read during update");
+                let metadata = result.result.records[0].metadata.as_ref().unwrap();
+                let Some(MetadataValue::Int(version)) = metadata.get("version") else {
+                    panic!("missing scalar version");
+                };
+                assert_eq!(
+                    metadata.get("versions"),
+                    Some(&MetadataValue::IntArray(vec![*version, *version])),
+                    "scalar and array metadata must come from the same committed update"
+                );
+            }
+        };
+        tokio::join!(writes, reads);
     }
 
     #[tokio::test]
