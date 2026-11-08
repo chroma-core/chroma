@@ -61,7 +61,7 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
             texts=input,
             task_type=self.task_type,
         )
-        return [np.array(data.embedding) for data in output.data]
+        return [np.array(embedding) for embedding in output["embeddings"]]
 
     def embed_query(self, input: Documents) -> Embeddings:
         if not all(isinstance(item, str) for item in input):
@@ -75,7 +75,7 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
             texts=input,
             task_type=task_type,
         )
-        return [np.array(data.embedding) for data in output.data]
+        return [np.array(embedding) for embedding in output["embeddings"]]
 
     @staticmethod
     def name() -> str:
