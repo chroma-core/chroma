@@ -15,6 +15,18 @@ def create_batches(
     metadatas: Optional[Metadatas] = None,
     documents: Optional[Documents] = None,
 ) -> List[Tuple[IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]]]:
+    """Split aligned inputs into batches, rejecting mismatched lengths before slicing."""
+    for name, values in (
+        ("embeddings", embeddings),
+        ("metadatas", metadatas),
+        ("documents", documents),
+    ):
+        if values is not None and len(values) != len(ids):
+            raise ValueError(
+                f"Expected {name} to have the same length as ids, "
+                f"got {len(values)} {name} and {len(ids)} ids"
+            )
+
     _batches: List[
         Tuple[IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]]
     ] = []
