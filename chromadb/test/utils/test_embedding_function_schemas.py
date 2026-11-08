@@ -466,6 +466,7 @@ class TestEmbeddingFunctionSchemas:
         mock_boto3 = MagicMock()
         mock_jina = MagicMock()
         mock_mistralai = MagicMock()
+        mock_oci = MagicMock()
 
         # Mock boto3.Session for amazon_bedrock
         mock_boto3_session = MagicMock()
@@ -514,6 +515,7 @@ class TestEmbeddingFunctionSchemas:
             "boto3": mock_boto3,
             "jina": mock_jina,
             "mistralai": mock_mistralai,
+            "oci": mock_oci,
         }
 
         for module_name, mock_module in modules_to_mock.items():
@@ -556,6 +558,9 @@ class TestEmbeddingFunctionSchemas:
                 model=ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
                 task="nl_to_code",
             )
+        elif ef_name == "oci_genai":
+            # OCI GenAI needs a compartment OCID; oci is mocked in sys.modules above
+            return ef_class(compartment_id="ocid1.compartment.oc1..test")
         else:
             # Try with no args first
             try:

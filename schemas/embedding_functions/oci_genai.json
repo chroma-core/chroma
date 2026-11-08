@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OCI Generative AI Embedding Function Schema",
+  "description": "Schema for the Oracle Cloud Infrastructure (OCI) Generative AI embedding function configuration",
+  "version": "1.0.0",
+  "type": "object",
+  "properties": {
+    "model_name": {
+      "type": "string",
+      "description": "Identifier of the OCI Generative AI embedding model, e.g. cohere.embed-v4.0"
+    },
+    "compartment_id": {
+      "type": "string",
+      "description": "OCID of the compartment used to call the OCI Generative AI service"
+    },
+    "service_endpoint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "OCI Generative AI inference endpoint. Derived from the profile or principal region when omitted"
+    },
+    "auth_type": {
+      "type": "string",
+      "enum": [
+        "API_KEY",
+        "SECURITY_TOKEN",
+        "INSTANCE_PRINCIPAL",
+        "RESOURCE_PRINCIPAL"
+      ],
+      "description": "How to authenticate against OCI. Credentials themselves are never stored in the config"
+    },
+    "auth_profile": {
+      "type": "string",
+      "description": "Profile name in the OCI config file (API_KEY and SECURITY_TOKEN auth types)"
+    },
+    "auth_file_location": {
+      "type": "string",
+      "description": "Path of the OCI config file (API_KEY and SECURITY_TOKEN auth types)"
+    },
+    "truncate": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "START",
+        "END"
+      ],
+      "description": "How inputs longer than the model context are truncated"
+    },
+    "input_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "SEARCH_DOCUMENT",
+        "SEARCH_QUERY",
+        "CLASSIFICATION",
+        "CLUSTERING",
+        "IMAGE",
+        null
+      ],
+      "description": "Input type forced for every request. When null, documents use SEARCH_DOCUMENT and queries use SEARCH_QUERY"
+    },
+    "output_dimensions": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Requested embedding size for models that support it (e.g. 256, 512, 1024, 1536 for cohere.embed-v4.0)"
+    }
+  },
+  "required": [
+    "model_name",
+    "compartment_id"
+  ],
+  "additionalProperties": false
+}
