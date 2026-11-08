@@ -72,7 +72,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
                 raise ValueError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
-        bm25_kwargs = {
+        bm25_kwargs: Dict[str, Any] = {
             "model_name": "Qdrant/bm25",
         }
         optional_params = {
@@ -87,7 +87,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
         }
         for key, value in optional_params.items():
             if value is not None:
-                bm25_kwargs[key] = value
+                bm25_kwargs[key] = cast(str | float | int, value)
         bm25_kwargs.update({k: v for k, v in kwargs.items() if v is not None})
         self._model = Bm25(**bm25_kwargs)
 

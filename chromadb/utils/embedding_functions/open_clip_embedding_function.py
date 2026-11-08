@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from chromadb.api.types import EmbeddingFunction, Space
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.api.types import (

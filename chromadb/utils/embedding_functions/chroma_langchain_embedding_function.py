@@ -71,7 +71,7 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
             List[List[float]], self.embedding_function.embed_documents(list(documents))
         )
 
-    def embed_query(self, query: str) -> List[float]:
+    def embed_query(self, query: str) -> List[float]:  # type: ignore[override]
         """
         Embed a query using the langchain embedding function.
 
