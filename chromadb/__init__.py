@@ -220,6 +220,8 @@ def PersistentClient(
     """
     if settings is None:
         settings = Settings()
+    else:
+        settings = settings.model_copy()
     settings.persist_directory = str(path)
     settings.is_persistent = True
 
