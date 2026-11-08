@@ -27,6 +27,20 @@ def normalize_sparse_vector(
         ValueError: If values are not numeric
         ValueError: If labels is provided and has different length than indices
     """
+    # zip() silently truncates to the shortest input, which would drop data
+    # instead of surfacing a mismatch. Validate lengths up front so the
+    # documented ValueError is raised rather than producing a malformed vector.
+    if len(indices) != len(values):
+        raise ValueError(
+            f"indices and values must have the same length, "
+            f"got {len(indices)} indices and {len(values)} values"
+        )
+    if labels is not None and len(labels) != len(indices):
+        raise ValueError(
+            f"labels must have the same length as indices, "
+            f"got {len(labels)} labels and {len(indices)} indices"
+        )
+
     if not indices:
         return SparseVector(indices=[], values=[], labels=None)
 
