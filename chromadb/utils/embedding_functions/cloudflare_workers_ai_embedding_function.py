@@ -39,10 +39,10 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
             api_key_env_var: The environment variable name for the Cloudflare Workers AI API key.
         """
         try:
-            import httpx
+            import httpx2
         except ImportError:
             raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
+                "The httpx2 python package is not installed. Please install it with `pip install httpx2`"
             )
 
         if api_key is not None:
@@ -72,7 +72,7 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         else:
             self._api_url = f"{BASE_URL}/{self.account_id}/ai/run/{self.model_name}"
 
-        self._session = httpx.Client()
+        self._session = httpx2.Client()
         self._session.headers.update(
             {"Authorization": f"Bearer {self.api_key}", "Accept-Encoding": "identity"}
         )

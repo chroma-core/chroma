@@ -65,7 +65,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
-        self._httpx = importlib.import_module("httpx")
+        self._httpx = importlib.import_module("httpx2")
 
     def __call__(self, input: Embeddable) -> Embeddings:
         """

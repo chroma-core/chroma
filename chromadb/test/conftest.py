@@ -20,7 +20,7 @@ from uuid import UUID
 import hypothesis
 import pytest
 import uvicorn
-from httpx import ConnectError
+from httpx2 import ConnectError
 from typing_extensions import Protocol
 
 from chromadb.api.async_fastapi import AsyncFastAPI
