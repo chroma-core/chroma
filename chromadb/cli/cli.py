@@ -22,7 +22,7 @@ def build_cli_args(**kwargs):
 def update():
     try:
         url = f"https://api.github.com/repos/chroma-core/chroma/releases"
-        response = requests.get(url)
+        response = requests.get(url, timeout=30)
         response.raise_for_status()
         releases = response.json()
 
