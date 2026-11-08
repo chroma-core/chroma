@@ -55,6 +55,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
 
         if os.getenv("OPENAI_API_KEY") is not None:

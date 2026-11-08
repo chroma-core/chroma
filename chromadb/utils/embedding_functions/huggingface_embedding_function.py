@@ -39,6 +39,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
         if os.getenv("HUGGINGFACE_API_KEY") is not None:
             self.api_key_env_var = "HUGGINGFACE_API_KEY"
@@ -161,6 +162,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
 
         self.url = url
