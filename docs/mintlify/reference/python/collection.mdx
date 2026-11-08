@@ -30,6 +30,11 @@ Return the number of records in the collection.
 
 Add records to the collection.
 
+Records whose IDs already exist in the collection are not modified: the
+existing record is kept and the new record is dropped. Embeddings and
+documents may be provided together; when embeddings are given they are
+used directly and any documents are stored as-is.
+
 <ParamField path="ids" type="Union[str, IDs]" required>
   Record IDs to add.
 </ParamField>
@@ -57,9 +62,7 @@ Add records to the collection.
 **Raises:**
 
 - ValueError: If embeddings and documents are both missing.
-- ValueError: If embeddings and documents are both provided.
 - ValueError: If lengths of provided fields do not match.
-- ValueError: If an ID already exists.
 
 
 ### get
@@ -130,6 +133,10 @@ the API.
 The `ids`, `where`, `where_document`, and `include` parameters are applied
 to all queries.
 
+If multiple query input types are provided, the provided embeddings take
+precedence: the query is executed with them as-is and the other inputs are
+ignored.
+
 <ParamField path="query_embeddings" type="Optional[Embeddings]">
   Raw embeddings to query for.
 </ParamField>
@@ -171,7 +178,6 @@ to all queries.
 **Raises:**
 
 - ValueError: If no query input is provided.
-- ValueError: If multiple query input types are provided.
 
 
 ### modify
