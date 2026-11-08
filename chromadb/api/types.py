@@ -633,6 +633,28 @@ class QueryResult(TypedDict):
 
     QueryResult will only include ids and the fields specified in the `include` param
     when making the query() operation.
+
+    Values returned by Collection.query and AsyncCollection.query have an
+    `embeddings` field that is None unless embeddings are requested with
+    `include=["embeddings"]`. Embeddings are excluded by default. When returned,
+    the field is a list of NumPy arrays, one per query in query order. Each
+    nonempty array has one row per matching record and one column per embedding
+    dimension. A query with no matches has an empty array; neither a fixed shape
+    for empty arrays nor a fixed NumPy dtype is guaranteed.
+
+    The embedding type annotation also accepts other representations. Values
+    returned by Collection.query and AsyncCollection.query use the NumPy
+    representation described here, regardless of the input container type.
+
+    To convert returned embeddings to nested Python lists, check for None
+    explicitly, then convert each query's array:
+
+    >>> results = collection.query(
+    ...     query_embeddings=[[0.1, 0.2, 0.3]], include=["embeddings"]
+    ... )
+    >>> embeddings = results["embeddings"]
+    >>> if embeddings is not None:
+    ...     embedding_lists = [batch.tolist() for batch in embeddings]
     """
 
     ids: List[IDs]
