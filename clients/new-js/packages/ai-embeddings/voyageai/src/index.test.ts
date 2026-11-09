@@ -10,7 +10,7 @@ describe("VoyageAIEmbeddingFunction", () => {
 
   const defaultParametersTest = "should initialize with default parameters";
   if (!process.env.VOYAGE_API_KEY) {
-    it.skip(defaultParametersTest, () => { });
+    it.skip(defaultParametersTest, () => {});
   } else {
     it(defaultParametersTest, () => {
       const embedder = new VoyageAIEmbeddingFunction({ modelName: MODEL });
@@ -24,7 +24,7 @@ describe("VoyageAIEmbeddingFunction", () => {
 
   const customParametersTest = "should initialize with custom parameters";
   if (!process.env.VOYAGE_API_KEY) {
-    it.skip(customParametersTest, () => { });
+    it.skip(customParametersTest, () => {});
   } else {
     it(customParametersTest, () => {
       const embedder = new VoyageAIEmbeddingFunction({
@@ -36,15 +36,20 @@ describe("VoyageAIEmbeddingFunction", () => {
     });
   }
 
-  it("should initialize with custom error for a API key", () => {
+  it("should warn when the API key is missing", () => {
     const originalEnv = process.env.VOYAGE_API_KEY;
     delete process.env.VOYAGE_API_KEY;
+    const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
 
     try {
       expect(() => {
         new VoyageAIEmbeddingFunction({ modelName: MODEL });
-      }).toThrow("Voyage API key is required");
+      }).not.toThrow();
+      expect(warning).toHaveBeenCalledWith(
+        "Voyage API key is not set. Please provide it in the constructor or set the environment variable VOYAGE_API_KEY.",
+      );
     } finally {
+      warning.mockRestore();
       if (originalEnv) {
         process.env.VOYAGE_API_KEY = originalEnv;
       }
@@ -70,7 +75,7 @@ describe("VoyageAIEmbeddingFunction", () => {
 
   const buildFromConfigTest = "should build from config";
   if (!process.env.VOYAGE_API_KEY) {
-    it.skip(buildFromConfigTest, () => { });
+    it.skip(buildFromConfigTest, () => {});
   } else {
     it(buildFromConfigTest, () => {
       const config = {
@@ -86,7 +91,7 @@ describe("VoyageAIEmbeddingFunction", () => {
 
     const generateEmbeddingsTest = "should generate embeddings";
     if (!process.env.VOYAGE_API_KEY) {
-      it.skip(generateEmbeddingsTest, () => { });
+      it.skip(generateEmbeddingsTest, () => {});
     } else {
       it(generateEmbeddingsTest, async () => {
         const embedder = new VoyageAIEmbeddingFunction({ modelName: MODEL });

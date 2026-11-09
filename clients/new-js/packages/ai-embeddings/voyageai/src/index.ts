@@ -28,12 +28,25 @@ export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
   public readonly name = NAME;
   private readonly apiKeyEnvVar: string;
   private readonly modelName: string;
-  private readonly inputType?: string;
+  private readonly inputType?: "query" | "document";
   private readonly truncation: boolean;
   private client: VoyageAIClient;
 
   constructor(args: VoyageAIArgs) {
-    const { apiKeyEnvVar = "VOYAGE_API_KEY", modelName, inputType, truncation } = args;
+    const {
+      apiKeyEnvVar = "VOYAGE_API_KEY",
+      modelName,
+      inputType,
+      truncation,
+    } = args;
+
+    if (
+      inputType != null &&
+      inputType !== "query" &&
+      inputType !== "document"
+    ) {
+      throw new ChromaValueError("Voyage input type must be query or document");
+    }
 
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
 
@@ -45,8 +58,8 @@ export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
 
     this.modelName = modelName;
     this.apiKeyEnvVar = apiKeyEnvVar;
-    this.inputType = inputType;
-    this.truncation = truncation !== undefined ? truncation : true;;
+    this.inputType = inputType ?? undefined;
+    this.truncation = truncation !== undefined ? truncation : true;
     this.client = new VoyageAIClient({ apiKey });
   }
 
@@ -54,6 +67,8 @@ export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
     const response = await this.client.embed({
       input: texts,
       model: this.modelName,
+      inputType: this.inputType,
+      truncation: this.truncation,
     });
 
     if (!response.data || !response.data.every((e) => e !== undefined)) {
