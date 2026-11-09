@@ -243,6 +243,7 @@
             "group": "Frameworks",
             "pages": [
               "integrations/frameworks/anthropic-mcp",
+              "integrations/frameworks/agent-framework",
               "integrations/frameworks/google-adk",
               "integrations/frameworks/braintrust",
               "integrations/frameworks/contextual-ai",
@@ -253,6 +254,7 @@
               "integrations/frameworks/mem0",
               "integrations/frameworks/openlit",
               "integrations/frameworks/openllmetry",
+              "integrations/frameworks/semantic-kernel",
               "integrations/frameworks/streamlit",
               "integrations/frameworks/voltagent"
             ]
