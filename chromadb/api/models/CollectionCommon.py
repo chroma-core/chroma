@@ -11,6 +11,7 @@ from typing import (
     Union,
     cast,
     List,
+    Tuple,
 )
 from chromadb.types import Metadata
 import numpy as np
@@ -111,6 +112,30 @@ def validation_context(name: str) -> Callable[[Callable[..., T]], Callable[..., 
         return wrapper
 
     return decorator
+
+
+_FALLBACK_BATCH = 5000
+_PREPARE_KEYS = {
+    "document_cols",
+    "id_col",
+    "metadata_cols",
+    "embedding_col",
+    "id_strategy",
+    "doc_separator",
+    "nested",
+    "drop_none",
+    "empty_metadata_fill",
+}
+
+
+def _split_opts(opts: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[int], bool]:
+    opts = dict(opts)
+    batch_size = opts.pop("batch_size", None)
+    progress = opts.pop("progress", False)
+    prep = {k: opts.pop(k) for k in list(opts) if k in _PREPARE_KEYS}
+    if opts:
+        raise TypeError(f"Unexpected options: {sorted(opts)}")
+    return prep, batch_size, progress
 
 
 class CollectionCommon(Generic[ClientT]):

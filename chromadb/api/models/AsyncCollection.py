@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Optional, Union, List, cast
+from typing import TYPE_CHECKING, Optional, Union, List, cast, Any
+import inspect
 
 from chromadb.api.types import (
     URI,
@@ -22,8 +23,12 @@ from chromadb.api.types import (
     DeleteResult,
     maybe_cast_one_to_many,
 )
-
-from chromadb.api.models.CollectionCommon import CollectionCommon
+from chromadb.api.ingest import is_tabular, prepare
+from chromadb.api.models.CollectionCommon import (
+    CollectionCommon,
+    _FALLBACK_BATCH,
+    _split_opts,
+)
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 from chromadb.execution.expression.plan import Search
 
@@ -53,7 +58,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
     async def add(
         self,
-        ids: OneOrMany[ID],
+        ids: Union[OneOrMany[ID], Any] = None,
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -64,10 +69,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> None:
+        **kwargs: Any,
+    ) -> Optional[int]:
         """Add embeddings to the data store.
         Args:
-            ids: The ids of the embeddings you wish to add
+            ids: The ids of the embeddings you wish to add, or a tabular dataset.
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
             metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
@@ -75,7 +81,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             uris: The uris of the images to associate with the embeddings. Optional.
 
         Returns:
-            None
+            Optional[int]: Number of records added when using tabular ingestion, else None
 
         Raises:
             ValueError: If you don't provide either embeddings or documents
@@ -83,8 +89,13 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you don't provide an embedding function and don't provide embeddings
             ValueError: If you provide both embeddings and documents
             ValueError: If you provide an id that already exists
-
         """
+        if is_tabular(ids):
+            return await self.add_data(ids, **kwargs)
+        if ids is None and "data" in kwargs and is_tabular(kwargs["data"]):
+            data = kwargs.pop("data")
+            return await self.add_data(data, **kwargs)
+
         add_request = self._validate_and_prepare_add_request(
             ids=ids,
             embeddings=embeddings,
@@ -489,7 +500,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
     async def upsert(
         self,
-        ids: OneOrMany[ID],
+        ids: Union[OneOrMany[ID], Any] = None,
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -500,18 +511,25 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> None:
+        **kwargs: Any,
+    ) -> Optional[int]:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
 
         Args:
-            ids: The ids of the embeddings to update
+            ids: The ids of the embeddings to update, or a tabular dataset.
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
             metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
 
         Returns:
-            None
+            Optional[int]: Number of records upserted when using tabular ingestion, else None
         """
+        if is_tabular(ids):
+            return await self.upsert_data(ids, **kwargs)
+        if ids is None and "data" in kwargs and is_tabular(kwargs["data"]):
+            data = kwargs.pop("data")
+            return await self.upsert_data(data, **kwargs)
+
         upsert_request = self._validate_and_prepare_upsert_request(
             ids=ids,
             embeddings=embeddings,
@@ -531,6 +549,104 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+    async def add_data(self, data: Any, **opts: Any) -> int:
+        """Add a DataFrame, dict of columns, record dict, or list of dicts.
+
+        Options: document_cols (str|list), id_col, metadata_cols, embedding_col,
+        id_strategy ('uuid'|'hash'), doc_separator, nested ('json'|'drop'|'error'),
+        batch_size, progress (bool). Returns the number of rows written.
+        """
+        prep, batch_size, progress = _split_opts(opts)
+        prepared = prepare(data, **prep)
+        if len(prepared) == 0:
+            return 0
+        if batch_size is None:
+            try:
+                r = self._client.get_max_batch_size()
+                batch_size = await r if inspect.isawaitable(r) else r
+            except Exception:
+                batch_size = _FALLBACK_BATCH
+
+        batches = prepared.batches(batch_size)
+        if progress:
+            try:
+                from tqdm import tqdm
+                total_batches = (len(prepared) + batch_size - 1) // batch_size
+                batches = tqdm(batches, total=total_batches, desc="Adding data")
+            except ImportError:
+                pass
+
+        for kw in batches:
+            await self.add(**kw)
+        return len(prepared)
+
+    async def upsert_data(self, data: Any, **opts: Any) -> int:
+        """Upsert a DataFrame, dict of columns, record dict, or list of dicts.
+
+        Options: document_cols (str|list), id_col, metadata_cols, embedding_col,
+        id_strategy ('uuid'|'hash'), doc_separator, nested ('json'|'drop'|'error'),
+        batch_size, progress (bool). Returns the number of rows written.
+        """
+        prep, batch_size, progress = _split_opts(opts)
+        prepared = prepare(data, **prep)
+        if len(prepared) == 0:
+            return 0
+        if batch_size is None:
+            try:
+                r = self._client.get_max_batch_size()
+                batch_size = await r if inspect.isawaitable(r) else r
+            except Exception:
+                batch_size = _FALLBACK_BATCH
+
+        batches = prepared.batches(batch_size)
+        if progress:
+            try:
+                from tqdm import tqdm
+                total_batches = (len(prepared) + batch_size - 1) // batch_size
+                batches = tqdm(batches, total=total_batches, desc="Upserting data")
+            except ImportError:
+                pass
+
+        for kw in batches:
+            await self.upsert(**kw)
+        return len(prepared)
+
+    # Aliases
+    add_dataframe = add_data
+    add_records = add_data
+    upsert_dataframe = upsert_data
+    upsert_records = upsert_data
+
+    async def get_dataframe(
+        self,
+        ids: Optional[OneOrMany[ID]] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = ["metadatas", "documents", "embeddings"],
+    ) -> Any:
+        """Retrieve collection records as a pandas DataFrame."""
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required for get_dataframe(). Install it with 'pip install pandas'.")
+
+        got = await self.get(ids=ids, where=where, limit=limit, offset=offset, where_document=where_document, include=include)
+        records = []
+        n = len(got["ids"])
+        for i in range(n):
+            row = {"id": got["ids"][i]}
+            if "documents" in got and got["documents"] is not None and i < len(got["documents"]):
+                row["document"] = got["documents"][i]
+            if "embeddings" in got and got["embeddings"] is not None and i < len(got["embeddings"]):
+                row["embedding"] = got["embeddings"][i]
+            if "metadatas" in got and got["metadatas"] is not None and i < len(got["metadatas"]):
+                m = got["metadatas"][i] or {}
+                row.update(m)
+            records.append(row)
+        return pd.DataFrame(records)
 
     async def delete(
         self,
