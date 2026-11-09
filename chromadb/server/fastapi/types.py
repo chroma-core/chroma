@@ -7,6 +7,11 @@ from chromadb.api.types import (
     IncludeMetadataDocumentsDistances,
 )
 
+# The Rust bindings take limit/offset/n_results as u32 values. Values
+# outside this range must be rejected at request validation; otherwise
+# the pyo3 conversion raises an unhandled OverflowError (HTTP 500).
+U32_MAX = 4294967295
+
 
 class AddEmbedding(BaseModel):
     # Pydantic doesn't handle Union types cleanly like Embeddings which has
@@ -34,7 +39,7 @@ class QueryEmbedding(BaseModel):
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
     query_embeddings: List[Any]
-    n_results: int = 10
+    n_results: int = Field(default=10, ge=0, le=U32_MAX)
     include: Include = IncludeMetadataDocumentsDistances
 
 
@@ -42,8 +47,8 @@ class GetEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
-    limit: Optional[int] = None
-    offset: Optional[int] = None
+    limit: Optional[int] = Field(default=None, ge=0, le=U32_MAX)
+    offset: Optional[int] = Field(default=None, ge=0, le=U32_MAX)
     include: Include = IncludeMetadataDocuments
 
 
@@ -51,7 +56,7 @@ class DeleteEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
-    limit: Optional[int] = Field(default=None, ge=0)
+    limit: Optional[int] = Field(default=None, ge=0, le=U32_MAX)
 
 
 class CreateCollection(BaseModel):
