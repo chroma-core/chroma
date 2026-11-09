@@ -178,7 +178,25 @@ def _to_f32(value: float) -> float:
     return value
 
 
+_F32_MAX = float(np.finfo(np.float32).max)
+
+
 def pack_embedding_safely(embedding: Embedding) -> str:
+    # Unpacking a numpy array into struct.pack converts every value to a
+    # Python float one at a time. Casting with numpy gives the same bytes much
+    # faster. float16 and float32 always fit in float32. float64 only takes
+    # this path when no value is outside the float32 range, so overflow is
+    # still handled by the code below.
+    if isinstance(embedding, np.ndarray) and embedding.ndim == 1:
+        dtype = embedding.dtype
+        if (
+            dtype == np.float32
+            or dtype == np.float16
+            or (dtype == np.float64 and not (np.abs(embedding) > _F32_MAX).any())
+        ):
+            return pybase64.b64encode_as_string(
+                embedding.astype("<f4", copy=False).tobytes()
+            )
     try:
         return pybase64.b64encode_as_string(
             _get_struct(len(embedding)).pack(*embedding)
