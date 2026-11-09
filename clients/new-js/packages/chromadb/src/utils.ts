@@ -172,7 +172,7 @@ const validateDocuments = ({
   }
 
   documents.forEach((document) => {
-    if (!nullable && typeof document !== "string" && !document) {
+    if (!nullable && typeof document !== "string") {
       throw new ChromaValueError(
         `Expected each document to be a string, but got ${typeof document}`,
       );
@@ -210,9 +210,10 @@ export const validateIDs = (ids: string[]) => {
   const seen = new Set();
   const duplicates = ids.filter((id) => {
     if (seen.has(id)) {
-      return id;
+      return true;
     }
     seen.add(id);
+    return false;
   });
   let message = "Expected IDs to be unique, but found duplicates of";
   if (duplicates.length > 0 && duplicates.length <= 5) {
