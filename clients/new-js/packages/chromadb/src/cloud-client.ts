@@ -1,33 +1,38 @@
 import { ChromaClient } from "./chroma-client";
 import * as process from "node:process";
 import { AdminClient } from "./admin-client";
-import { ChromaUnauthorizedError, ChromaValueError } from "./errors";
+import { ChromaValueError } from "./errors";
+import { CloudSyncClient, type CloudSyncAPI } from "./sync-client";
+
+export interface CloudClientArgs {
+  /** API key for authentication (or set CHROMA_API_KEY env var) */
+  apiKey?: string;
+  /** Host address of the Chroma cloud server. Defaults to 'api.trychroma.com' */
+  host?: string;
+  /** Port number of the Chroma cloud server. Defaults to 443 */
+  port?: number;
+  /** Tenant name for multi-tenant deployments */
+  tenant?: string;
+  /** Database name to connect to */
+  database?: string;
+  /** Host address of the Chroma Sync server. Defaults to 'sync.trychroma.com' */
+  syncHost?: string;
+  /** Additional fetch options for HTTP requests */
+  fetchOptions?: RequestInit;
+}
 
 /**
  * ChromaDB cloud client for connecting to hosted Chroma instances.
  * Extends ChromaClient with cloud-specific authentication and configuration.
  */
 export class CloudClient extends ChromaClient {
+  public readonly sync: CloudSyncAPI;
+
   /**
    * Creates a new CloudClient instance for Chroma Cloud.
    * @param args - Cloud client configuration options
    */
-  constructor(
-    args: Partial<{
-      /** API key for authentication (or set CHROMA_API_KEY env var) */
-      apiKey?: string;
-      /** Host address of the Chroma cloud server. Defaults to 'api.trychroma.com' */
-      host?: string;
-      /** Port number of the Chroma cloud server. Defaults to 443 */
-      port?: number;
-      /** Tenant name for multi-tenant deployments */
-      tenant?: string;
-      /** Database name to connect to */
-      database?: string;
-      /** Additional fetch options for HTTP requests */
-      fetchOptions?: RequestInit;
-    }> = {},
-  ) {
+  constructor(args: Partial<CloudClientArgs> = {}) {
     const apiKey = args.apiKey || process.env.CHROMA_API_KEY;
     if (!apiKey) {
       throw new ChromaValueError(
@@ -51,6 +56,13 @@ export class CloudClient extends ChromaClient {
     // Override from ChromaClient construction in case undefined. This will trigger auto-resolution in the "path" function
     this.tenant = tenant;
     this.database = database;
+
+    this.sync = new CloudSyncClient({
+      apiKey,
+      host: args.syncHost,
+      fetchOptions: args.fetchOptions,
+      databaseName: async () => this.database ?? (await this._path()).database,
+    });
   }
 }
 
