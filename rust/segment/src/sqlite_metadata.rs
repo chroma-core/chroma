@@ -654,22 +654,27 @@ fn create_union_subquery_for_int_float_ops(
 
 impl IntoSqliteExpr for CompositeExpression {
     fn eval(&self) -> SimpleExpr {
-        match self.operator {
-            BooleanOperator::And => {
-                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(true)));
-                for child in &self.children {
-                    expr = Expr::expr(expr).and(child.eval());
-                }
-                expr
-            }
-            BooleanOperator::Or => {
-                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(false)));
-                for child in &self.children {
-                    expr = Expr::expr(expr).or(child.eval());
-                }
-                expr
-            }
-        }
+        eval_composite_expression(self.operator, &self.children)
+    }
+}
+
+fn eval_composite_expression(operator: BooleanOperator, children: &[Where]) -> SimpleExpr {
+    if children.is_empty() {
+        return SimpleExpr::Value(sea_query::Value::Bool(Some(matches!(
+            operator,
+            BooleanOperator::And
+        ))));
+    }
+    if children.len() == 1 {
+        return children[0].eval();
+    }
+
+    let middle = children.len() / 2;
+    let left = eval_composite_expression(operator, &children[..middle]);
+    let right = eval_composite_expression(operator, &children[middle..]);
+    match operator {
+        BooleanOperator::And => Expr::expr(left).and(right),
+        BooleanOperator::Or => Expr::expr(left).or(right),
     }
 }
 
@@ -1155,20 +1160,41 @@ impl SqliteMetadataReader {
 
 #[cfg(test)]
 mod tests {
-    use super::{SqliteMetadataReader, SqliteMetadataWriter};
+    use super::{eval_composite_expression, SqliteMetadataReader, SqliteMetadataWriter};
     use crate::test::TestReferenceSegment;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get, ReadLevel},
         strategies::{any_collection_data_and_where_filter, TestCollectionData},
-        Chunk, CollectionAndSegments, ContainsOperator, DocumentOperator, LogRecord,
-        MetadataComparison, MetadataExpression, MetadataValue, Operation, OperationRecord,
-        PrimitiveOperator, UpdateMetadataValue, Where,
+        BooleanOperator, Chunk, CollectionAndSegments, ContainsOperator, DocumentOperator,
+        LogRecord, MetadataComparison, MetadataExpression, MetadataValue, Operation,
+        OperationRecord, PrimitiveOperator, UpdateMetadataValue, Where,
     };
     use proptest::prelude::*;
+    use sea_query::SqliteQueryBuilder;
     use std::collections::HashMap;
     use tokio::runtime::Runtime;
+
+    #[test]
+    fn large_composite_filter_builds_without_deep_expression_tree() {
+        let children = (0..16_500)
+            .map(|index| {
+                Where::Metadata(MetadataExpression {
+                    key: format!("key_{index}"),
+                    comparison: MetadataComparison::Primitive(
+                        PrimitiveOperator::Equal,
+                        MetadataValue::Bool(true),
+                    ),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let expression = eval_composite_expression(BooleanOperator::Or, &children);
+        let sql = expression.to_string(SqliteQueryBuilder);
+
+        assert_eq!(sql.matches(" OR ").count(), children.len() - 1);
+    }
 
     proptest! {
         #[test]
