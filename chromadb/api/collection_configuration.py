@@ -18,6 +18,26 @@ import warnings
 
 from chromadb.api.types import Schema
 
+# URL for migration documentation
+MIGRATION_DOCS_URL = "https://docs.trychroma.com/docs/collections/configure#embedding-functions"
+
+
+def _format_warning(message: str, warning_type: type = DeprecationWarning) -> str:
+    """Format a warning message with a link to migration documentation.
+
+    Args:
+        message: The warning message.
+        warning_type: The type of warning (DeprecationWarning, UserWarning, etc.)
+
+    Returns:
+        Formatted warning message with migration docs link.
+    """
+    if warning_type is DeprecationWarning:
+        return f"{message}. See migration guide: {MIGRATION_DOCS_URL}"
+    elif warning_type is UserWarning:
+        return f"{message}. See migration guide: {MIGRATION_DOCS_URL}"
+    return f"{message}. See migration guide: {MIGRATION_DOCS_URL}"
+
 
 class HNSWConfiguration(TypedDict, total=False):
     space: Space
@@ -55,7 +75,6 @@ def load_collection_configuration_from_json_str(
     return load_collection_configuration_from_json(config_json_map)
 
 
-# TODO: make warnings prettier and add link to migration docs
 def load_collection_configuration_from_json(
     config_json_map: Dict[str, Any]
 ) -> CollectionConfiguration:
@@ -80,7 +99,7 @@ def load_collection_configuration_from_json(
         ef_config = config_json_map["embedding_function"]
         if ef_config["type"] == "legacy":
             warnings.warn(
-                "legacy embedding function config",
+                _format_warning("legacy embedding function config"),
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -167,7 +186,7 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
                 register_embedding_function(type(ef))  # type: ignore
         except Exception as e:
             warnings.warn(
-                f"legacy embedding function config: {e}",
+                _format_warning(f"legacy embedding function config: {e}"),
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -291,7 +310,6 @@ def create_collection_configuration_from_legacy_metadata_dict(
     return CreateCollectionConfiguration(hnsw=hnsw_config)
 
 
-# TODO: make warnings prettier and add link to migration docs
 def load_create_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CreateCollectionConfiguration:
@@ -312,7 +330,7 @@ def load_create_collection_configuration_from_json(
         ef_config = json_map["embedding_function"]
         if ef_config["type"] == "legacy":
             warnings.warn(
-                "legacy embedding function config",
+                _format_warning("legacy embedding function config"),
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -334,7 +352,6 @@ def create_collection_configuration_to_json_str(
     return json.dumps(create_collection_configuration_to_json(config, metadata))
 
 
-# TODO: make warnings prettier and add link to migration docs
 def create_collection_configuration_to_json(
     config: CreateCollectionConfiguration,
     metadata: Optional[CollectionMetadata] = None,
@@ -393,14 +410,22 @@ def create_collection_configuration_to_json(
             if hnsw_config is not None:
                 if hnsw_config.get("space") not in ef.supported_spaces():
                     warnings.warn(
-                        f"space {hnsw_config.get('space')} is not supported by {ef.name()}. Supported spaces: {ef.supported_spaces()}",
+                        _format_warning(
+                            f"space {hnsw_config.get('space')} is not supported by {ef.name()}. "
+                            f"Supported spaces: {ef.supported_spaces()}",
+                            UserWarning,
+                        ),
                         UserWarning,
                         stacklevel=2,
                     )
             if spann_config is not None:
                 if spann_config.get("space") not in ef.supported_spaces():
                     warnings.warn(
-                        f"space {spann_config.get('space')} is not supported by {ef.name()}. Supported spaces: {ef.supported_spaces()}",
+                        _format_warning(
+                            f"space {spann_config.get('space')} is not supported by {ef.name()}. "
+                            f"Supported spaces: {ef.supported_spaces()}",
+                            UserWarning,
+                        ),
                         UserWarning,
                         stacklevel=2,
                     )
@@ -414,7 +439,11 @@ def create_collection_configuration_to_json(
             ):
                 if metadata.get("hnsw:space") not in ef.supported_spaces():
                     warnings.warn(
-                        f"space {metadata.get('hnsw:space')} is not supported by {ef.name()}. Supported spaces: {ef.supported_spaces()}",
+                        _format_warning(
+                            f"space {metadata.get('hnsw:space')} is not supported by {ef.name()}. "
+                            f"Supported spaces: {ef.supported_spaces()}",
+                            UserWarning,
+                        ),
                         UserWarning,
                         stacklevel=2,
                     )
@@ -427,7 +456,7 @@ def create_collection_configuration_to_json(
             register_embedding_function(type(ef))  # type: ignore
     except Exception as e:
         warnings.warn(
-            f"legacy embedding function config: {e}",
+            _format_warning(f"legacy embedding function config: {e}"),
             DeprecationWarning,
             stacklevel=2,
         )
@@ -608,7 +637,6 @@ def load_update_collection_configuration_from_json_str(
     return load_update_collection_configuration_from_json(json_map)
 
 
-# TODO: make warnings prettier and add link to migration docs
 def load_update_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> UpdateCollectionConfiguration:
@@ -629,7 +657,7 @@ def load_update_collection_configuration_from_json(
     if json_map.get("embedding_function") is not None:
         if json_map["embedding_function"]["type"] == "legacy":
             warnings.warn(
-                "legacy embedding function config",
+                _format_warning("legacy embedding function config"),
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -685,7 +713,6 @@ def overwrite_spann_configuration(
     return cast(SpannConfiguration, result)
 
 
-# TODO: make warnings prettier and add link to migration docs
 def overwrite_embedding_function(
     existing_embedding_function: EmbeddingFunction,  # type: ignore
     update_embedding_function: EmbeddingFunction,  # type: ignore
@@ -694,7 +721,7 @@ def overwrite_embedding_function(
     # Check for legacy embedding functions
     if existing_embedding_function.is_legacy() or update_embedding_function.is_legacy():
         warnings.warn(
-            "cannot update legacy embedding function config",
+            _format_warning("cannot update legacy embedding function config"),
             DeprecationWarning,
             stacklevel=2,
         )
