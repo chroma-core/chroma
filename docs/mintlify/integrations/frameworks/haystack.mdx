@@ -8,20 +8,101 @@ title: Haystack
 
 |[Docs](https://docs.haystack.deepset.ai/v2.0/docs) | [Github](https://github.com/deepset-ai/haystack) | [Haystack Integrations](https://haystack.deepset.ai/integrations) | [Tutorials](https://haystack.deepset.ai/tutorials) |
 
-You can use Chroma together with Haystack by installing the integration and using the `ChromaDocumentStore`
+## Installation
 
-### Installation
+Install the `chroma-haystack` integration package. This installs Haystack and Chroma as dependencies:
 
-```terminal
-pip install chroma-haystack
+```bash
+pip install haystack-ai chroma-haystack
 ```
 
-### Usage
+## Quick Start
 
-- The [Chroma Integration page](https://haystack.deepset.ai/integrations/chroma-documentstore)
-- [Chroma + Haystack Example](https://colab.research.google.com/drive/1YpDetI8BRbObPDEVdfqUcwhEX9UUXP-m?usp=sharing)
+Create a `ChromaDocumentStore`, write documents, and query them:
 
-#### Write documents into a ChromaDocumentStore
+```python
+from haystack import Document
+from haystack_integrations.document_stores.chroma import ChromaDocumentStore
+
+# Create an in-memory document store (default embedding: all-MiniLM-L6-v2)
+document_store = ChromaDocumentStore()
+
+# Write documents
+docs = [
+    Document(content="Python is a versatile programming language."),
+    Document(content="Chroma is an open-source vector database."),
+    Document(content="Haystack is an LLM framework for building AI apps."),
+]
+document_store.write_documents(docs)
+
+# Check how many documents are stored
+print(document_store.count_documents())  # Output: 3
+```
+
+## Deployment Modes
+
+Chroma supports three deployment modes. Choose the one that fits your use case:
+
+### In-Memory (Default, Development)
+
+Best for quick prototyping and testing. Data is lost when the process exits.
+
+```python
+from haystack_integrations.document_stores.chroma import ChromaDocumentStore
+
+document_store = ChromaDocumentStore()
+```
+
+### Persistent Storage
+
+Save data to disk so it persists between sessions. Pass `persist_path` with a directory path:
+
+```python
+document_store = ChromaDocumentStore(persist_path="./chroma_data")
+```
+
+### Remote Client-Server (Production)
+
+Connect to a running Chroma server for production workloads.
+
+Start the Chroma server:
+
+```bash
+chroma run --path /db_path
+```
+
+Or via Docker:
+
+```bash
+docker run -p 8000:8000 chromadb/chroma
+```
+
+Connect from Haystack:
+
+```python
+document_store = ChromaDocumentStore(host="localhost", port="8000")
+```
+
+> **Note**: Remote mode is incompatible with in-memory and persistent modes.
+
+## Writing Documents
+
+### Basic Write
+
+```python
+from haystack import Document
+from haystack_integrations.document_stores.chroma import ChromaDocumentStore
+
+document_store = ChromaDocumentStore()
+
+docs = [
+    Document(content="Chroma stores documents as vectors."),
+    Document(content="Haystack provides the orchestration layer.", metadata={"source": "docs"}),
+]
+document_store.write_documents(docs)
+```
+
+### From Text Files
 
 ```python
 import os
@@ -32,26 +113,78 @@ from haystack.components.converters import TextFileToDocument
 from haystack.components.writers import DocumentWriter
 from chroma_haystack import ChromaDocumentStore
 
-file_paths = ["data" / Path(name) for name in os.listdir("data")]
+data_folder = Path("data")
+file_paths = [data_folder / name for name in os.listdir(data_folder)]
 
 document_store = ChromaDocumentStore()
 
 indexing = Pipeline()
 indexing.add_component("converter", TextFileToDocument())
 indexing.add_component("writer", DocumentWriter(document_store))
-
 indexing.connect("converter", "writer")
 indexing.run({"converter": {"sources": file_paths}})
 ```
 
-#### Build RAG on top of Chroma
+## Retrieving Documents
+
+### Text Query (Auto-Embedded)
+
+Use `ChromaQueryTextRetriever` to search with plain text. Chroma auto-embeds the query:
 
 ```python
 from chroma_haystack.retriever import ChromaQueryRetriever
+
+retriever = ChromaQueryRetriever(document_store)
+results = retriever.run(query="What is Chroma?", top_k=3)
+print(results["documents"])
+```
+
+### Embedding Query
+
+Use `ChromaEmbeddingRetriever` with pre-computed embeddings:
+
+```python
+from chroma_haystack import ChromaEmbeddingRetriever
+
+retriever = ChromaEmbeddingRetriever(document_store)
+query_embedding = [0.1, 0.2, ...]  # pre-computed embedding vector
+results = retriever.run(query_embedding=query_embedding, top_k=3)
+```
+
+### Filtering Documents
+
+Filter by metadata using Haystack's filter syntax:
+
+```python
+from haystack import Document
+
+# Write documents with metadata
+docs = [
+    Document(content="Python tutorial", metadata={"category": "programming", "level": "beginner"}),
+    Document(content="Advanced ML", metadata={"category": "data_science", "level": "advanced"}),
+]
+document_store.write_documents(docs)
+
+# Filter: category equals "programming"
+filtered = document_store.filter_documents({
+    "field": "metadata.category",
+    "operator": "==",
+    "value": "programming"
+})
+```
+
+## Building a RAG Pipeline
+
+Full end-to-end RAG with Chroma and Haystack:
+
+```python
+from haystack import Pipeline
 from haystack.components.generators import HuggingFaceTGIGenerator
 from haystack.components.builders import PromptBuilder
+from chroma_haystack.retriever import ChromaQueryRetriever
+from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 
-prompt = """
+# Build prompt template = """
 Answer the query based on the provided context.
 If the context does not contain the answer, say 'Answer not found'.
 Context:
@@ -61,10 +194,13 @@ Context:
 query: {{query}}
 Answer:
 """
+
 prompt_builder = PromptBuilder(template=prompt)
 
-llm = HuggingFaceTGIGenerator(model="mistralai/Mixtral-8x7B-Instruct-v0.1", token='YOUR_HF_TOKEN')
+llm = HuggingFaceTGIGenerator(model="mistralai/Mixtral-8x7B-Instruct-v0.1", token="YOUR_HF_TOKEN")
 llm.warm_up()
+
+document_store = ChromaDocumentStore()
 retriever = ChromaQueryRetriever(document_store)
 
 querying = Pipeline()
@@ -75,6 +211,42 @@ querying.add_component("llm", llm)
 querying.connect("retriever.documents", "prompt_builder.documents")
 querying.connect("prompt_builder", "llm")
 
-results = querying.run({"retriever": {"queries": [query], "top_k": 3},
-                        "prompt_builder": {"query": query}})
+results = querying.run({
+    "retriever": {"queries": ["What is Chroma?"], "top_k": 3},
+    "prompt_builder": {"query": "What is Chroma?"}
+})
+print(results["llm"]["replies"])
 ```
+
+## Collection Configuration
+
+Specify a custom collection name and embedding function:
+
+```python
+document_store = ChromaDocumentStore(
+    collection_name="my_collection",
+    embedding_function="all-MiniLM-L6-v2"
+)
+```
+
+## Deleting Documents
+
+```python
+# Delete by ID
+document_store.delete_documents(ids=["doc-id-1", "doc-id-2"])
+```
+
+## Troubleshooting
+
+- **Import errors**: Ensure both `haystack-ai` and `chroma-haystack` are installed.
+- **Empty results**: Verify documents were written with `count_documents()` before querying.
+- **Remote connection refused**: Confirm the Chroma server is running and the host/port are correct.
+- **HuggingFace errors**: Set your `HF_TOKEN` environment variable or pass `token` directly to the generator.
+
+## Resources
+
+- [Haystack Documentation](https://docs.haystack.deepset.ai/v2.0/docs)
+- [Haystack GitHub](https://github.com/deepset-ai/haystack)
+- [Chroma Integration Page](https://haystack.deepset.ai/integrations/chroma-documentstore)
+- [Colab Example](https://colab.research.google.com/drive/1YpDetI8BRbObPDEVdfqUcwhEX9UUXP-m?usp=sharing)
+- [Haystack Chroma Cookbook](https://haystack.deepset.ai/cookbook/chroma-indexing-and-rag-examples)
