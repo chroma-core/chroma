@@ -1,5 +1,5 @@
 from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import numpy as np
 from chromadb.utils.embedding_functions.config_validation import (
     validate_embedding_function_kwargs_are_safe,
@@ -9,7 +9,7 @@ from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
-    models: Dict[str, Any] = {}
+    models: Dict[Tuple[str, str], Any] = {}
 
     # If you have a beefier machine, try "gtr-t5-large".
     # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
@@ -44,11 +44,12 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                 raise ValueError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
 
-        if model_name not in self.models:
-            self.models[model_name] = SentenceTransformer(
+        model_key = (model_name, device)
+        if model_key not in self.models:
+            self.models[model_key] = SentenceTransformer(
                 model_name_or_path=model_name, device=device, **kwargs
             )
-        self._model = self.models[model_name]
+        self._model = self.models[model_key]
 
     def __call__(self, input: Documents) -> Embeddings:
         """Generate embeddings for the given documents.
