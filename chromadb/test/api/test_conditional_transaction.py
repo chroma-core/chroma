@@ -12,10 +12,12 @@ from chromadb.api.conditional_http import ConditionalHttpTransaction
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import ConditionalCommitResult, GetResult
+from chromadb.base_types import SparseVector
 from chromadb.config import System
 from chromadb.errors import (
     BackoffError,
     ConditionalWriteConflictError,
+    InvalidArgumentError,
     StaleReadError,
 )
 from chromadb.types import Collection as CollectionModel
@@ -290,6 +292,116 @@ def test_http_conditional_commit_sends_read_set_without_replay() -> None:
     assert [operation["operation"] for operation in payload["operations"]] == ["add"]
 
 
+def test_http_conditional_transaction_paginated_read_does_not_mark_absent() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+
+    first_payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["doc-2"],
+            "where": None,
+            "where_document": None,
+            "limit": None,
+            "offset": None,
+            "include": ["documents"],
+        },
+    )
+    transaction.record_get(first_payload, ["doc-2"], 42)
+    assert transaction._known_present == {"doc-2"}
+
+    payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["doc-1", "doc-2", "doc-3"],
+            "where": None,
+            "where_document": None,
+            "limit": 1,
+            "offset": None,
+            "include": ["documents"],
+        },
+    )
+    transaction.record_get(payload, ["doc-1"], 42)
+    assert transaction._known_present == {"doc-1", "doc-2"}
+    assert transaction._known_absent == set()
+    with pytest.raises(
+        InvalidArgumentError,
+        match='transactional add for id "doc-3" requires a prior read proving the id is absent',
+    ):
+        transaction.buffer_add(
+            collection_id,
+            "tenant",
+            "database",
+            ["doc-3"],
+            [np.array([1.0], dtype=np.float32)],
+            None,
+            None,
+            None,
+        )
+
+
+def test_http_conditional_transaction_offset_read_does_not_mark_absent() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+
+    payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["doc-1", "doc-2"],
+            "where": None,
+            "where_document": None,
+            "limit": None,
+            "offset": 1,
+            "include": ["documents"],
+        },
+    )
+    transaction.record_get(payload, ["doc-2"], 42)
+    assert transaction._known_present == {"doc-2"}
+    assert transaction._known_absent == set()
+    with pytest.raises(
+        InvalidArgumentError,
+        match='transactional add for id "doc-1" requires a prior read proving the id is absent',
+    ):
+        transaction.buffer_add(
+            collection_id,
+            "tenant",
+            "database",
+            ["doc-1"],
+            [np.array([1.0], dtype=np.float32)],
+            None,
+            None,
+            None,
+        )
+
+
+def test_http_conditional_transaction_unconstrained_limit_marks_absent() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+
+    payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["doc-1", "doc-2"],
+            "where": None,
+            "where_document": None,
+            "limit": 2,
+            "offset": 0,
+            "include": ["documents"],
+        },
+    )
+    transaction.record_get(payload, ["doc-1"], 42)
+    assert transaction._known_present == {"doc-1"}
+    assert transaction._known_absent == {"doc-2"}
+
+
 def test_http_conditional_commit_sends_write_only_upsert_without_reads() -> None:
     transaction = ConditionalHttpTransaction()
     collection_id = uuid4()
@@ -354,6 +466,78 @@ def test_http_conditional_commit_preserves_metadata_payload() -> None:
     _, payload = prepared
     assert payload["operations"][0]["payload"]["metadatas"] == [
         {"tag": "value", "deleted": None}
+    ]
+
+
+def test_http_conditional_commit_serializes_sparse_vector_metadata() -> None:
+    transaction = ConditionalHttpTransaction()
+    collection_id = uuid4()
+    sparse = SparseVector(indices=[1, 3], values=[0.5, 0.8], labels=["a", "b"])
+    expected_sparse_dict = {
+        "#type": "sparse_vector",
+        "indices": [1, 3],
+        "values": [0.5, 0.8],
+        "tokens": ["a", "b"],
+    }
+
+    get_payload = transaction.prepare_get(
+        collection_id,
+        "tenant",
+        "database",
+        {
+            "ids": ["present", "absent"],
+            "where": None,
+            "where_document": None,
+            "limit": None,
+            "offset": None,
+            "include": ["documents"],
+        },
+    )
+    transaction.record_get(get_payload, ["present"], 42)
+
+    transaction.buffer_add(
+        collection_id,
+        "tenant",
+        "database",
+        ["absent"],
+        [np.array([1.0], dtype=np.float32)],
+        [{"sparse": sparse}],
+        None,
+        None,
+    )
+    transaction.buffer_update(
+        collection_id,
+        "tenant",
+        "database",
+        ["present"],
+        None,
+        [{"sparse": sparse, "deleted": None}],
+        None,
+        None,
+    )
+    transaction.buffer_upsert(
+        collection_id,
+        "tenant",
+        "database",
+        ["upserted-1", "upserted-2"],
+        [np.array([1.0], dtype=np.float32), np.array([2.0], dtype=np.float32)],
+        [{"sparse": sparse}, None],
+        None,
+        None,
+    )
+
+    prepared = transaction.prepare_commit_payload()
+    assert prepared is not None
+    _, payload = prepared
+    assert payload["operations"][0]["payload"]["metadatas"] == [
+        {"sparse": expected_sparse_dict}
+    ]
+    assert payload["operations"][1]["payload"]["metadatas"] == [
+        {"sparse": expected_sparse_dict, "deleted": None}
+    ]
+    assert payload["operations"][2]["payload"]["metadatas"] == [
+        {"sparse": expected_sparse_dict},
+        None,
     ]
 
 
