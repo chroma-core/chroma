@@ -17,7 +17,8 @@ After grouping and aggregation, results from all groups are flattened and sorted
 
 <CodeGroup>
 ```python Python
-from chromadb import Search, K, Knn, GroupBy, MinK
+from chromadb import Search, K, Knn
+from chromadb.execution.expression import GroupBy, MinK
 
 # Get top 3 results per category, ordered by score
 search = (Search()
@@ -79,7 +80,8 @@ The `GroupBy` class specifies how to partition results and which records to keep
 
 <CodeGroup>
 ```python Python
-from chromadb import GroupBy, MinK, K
+from chromadb import K
+from chromadb.execution.expression import GroupBy, MinK
 
 # Single grouping key
 GroupBy(
@@ -126,7 +128,8 @@ Keeps the k records with the **smallest** values for the specified keys. Use `Mi
 
 <CodeGroup>
 ```python Python
-from chromadb import MinK, K
+from chromadb import K
+from chromadb.execution.expression import MinK
 
 # Keep 3 records with lowest scores per group
 MinK(keys=K.SCORE, k=3)
@@ -157,7 +160,8 @@ Keeps the k records with the **largest** values for the specified keys. Use `Max
 
 <CodeGroup>
 ```python Python
-from chromadb import MaxK, K
+from chromadb import K
+from chromadb.execution.expression import MaxK
 
 # Keep 3 records with highest ratings per group
 MaxK(keys=K("rating"), k=3)
@@ -338,7 +342,8 @@ Here's a practical example showing diversified search results across categories:
 
 <CodeGroup>
 ```python Python
-from chromadb import Search, K, Knn, GroupBy, MinK
+from chromadb import Search, K, Knn
+from chromadb.execution.expression import GroupBy, MinK
 
 # Diversified product search - ensure results from multiple categories
 search = (Search()

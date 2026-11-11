@@ -15,17 +15,17 @@ Each schema follows the JSON Schema Draft-07 specification and includes:
 
 ## Usage
 
-The schemas can be used to validate the configuration of embedding functions using the `validate_config` function:
+The schemas can be used to validate the configuration of embedding functions using the `validate_config_schema` function:
 
 ```python
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 # Validate a configuration
 config = {
     "api_key_env_var": "CHROMA_OPENAI_API_KEY",
     "model_name": "text-embedding-ada-002"
 }
-validate_config(config, "openai")
+validate_config_schema(config, "openai")
 ```
 
 ## Adding New Schemas

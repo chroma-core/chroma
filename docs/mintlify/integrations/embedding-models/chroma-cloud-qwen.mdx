@@ -12,7 +12,8 @@ Chroma provides a convenient wrapper around Chroma Cloud's Qwen embedding API. T
 This embedding function relies on the `httpx` python package, which you can install with `pip install httpx`.
 
 ```python
-from chromadb.utils.embedding_functions import ChromaCloudQwenEmbeddingFunction, ChromaCloudQwenEmbeddingModel
+from chromadb.utils.embedding_functions import ChromaCloudQwenEmbeddingFunction
+from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import ChromaCloudQwenEmbeddingModel
 import os
 
 os.environ["CHROMA_API_KEY"] = "YOUR_API_KEY"
