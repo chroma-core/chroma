@@ -1,3 +1,4 @@
+mod backlog;
 mod compaction_manager;
 pub(crate) mod config;
 mod scheduler;

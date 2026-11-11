@@ -13,6 +13,7 @@ use opentelemetry::metrics::{Counter, Gauge};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::compactor::backlog::EligibleBacklog;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
 
@@ -106,6 +107,8 @@ pub(crate) struct Scheduler {
     job_expiry_seconds: u64,
     max_failure_count: i32,
     metrics: SchedulerMetrics,
+    eligible_backlog: EligibleBacklog,
+    backlog_scan_complete: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -146,6 +149,8 @@ impl Scheduler {
             job_expiry_seconds,
             max_failure_count,
             metrics: SchedulerMetrics::default(),
+            eligible_backlog: EligibleBacklog::new(),
+            backlog_scan_complete: true,
         }
     }
 
@@ -262,6 +267,7 @@ impl Scheduler {
                 collections
             }
             Err(e) => {
+                self.backlog_scan_complete = false;
                 tracing::error!("Error: {:?}", e);
                 one_off_collections
             }
@@ -318,6 +324,7 @@ impl Scheduler {
                 }
             }
             if had_error {
+                self.backlog_scan_complete = false;
                 continue;
             }
             if all_collections.len() != collection_infos.len() {
@@ -448,6 +455,7 @@ impl Scheduler {
                     }
                 }
                 Err(e) => {
+                    self.backlog_scan_complete = false;
                     tracing::error!("Error: {:?}", e);
                     continue;
                 }
@@ -563,6 +571,7 @@ impl Scheduler {
     }
 
     pub(crate) fn succeed_job(&mut self, job_id: JobId) {
+        self.eligible_backlog.completed(CollectionUuid(job_id.0));
         tracing::info!("Compaction for {} just successfully finished", job_id);
         if self.in_progress_jobs.remove(&job_id).is_none() {
             tracing::warn!(
@@ -657,6 +666,7 @@ impl Scheduler {
         self.job_queue.clear();
 
         if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
+            self.eligible_backlog.update([], &HashSet::new());
             tracing::error!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
             return;
         }
@@ -669,14 +679,32 @@ impl Scheduler {
 
         // Recompute disabled list.
         self.recompute_disabled_collections();
-        let collections = self.get_collections_with_new_data().await;
-        if collections.is_empty() {
-            return;
+        for id in &self.disabled_collections {
+            self.eligible_backlog.completed(*id);
         }
+        self.backlog_scan_complete = true;
+        let collections = self.get_collections_with_new_data().await;
         let filtered_collections = self.filter_collections(collections).await;
         let collection_records = self
             .verify_and_enrich_collections(filtered_collections)
             .await;
+        // Active jobs are omitted by discovery deduplication. Keep their existing clocks,
+        // but exclude deliberately disabled work and manually submitted one-off jobs.
+        if self.backlog_scan_complete {
+            let active = self
+                .in_progress_jobs
+                .keys()
+                .map(|job| CollectionUuid(job.0))
+                .filter(|id| !self.disabled_collections.contains(id))
+                .collect();
+            self.eligible_backlog.update(
+                collection_records
+                    .iter()
+                    .filter(|record| !self.oneoff_collections.contains_key(&record.collection_id))
+                    .map(|record| (record.collection_id, record.offset)),
+                &active,
+            );
+        }
         self.schedule_internal(collection_records).await;
     }
 
@@ -852,6 +880,30 @@ mod tests {
             std::env::remove_var("CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS");
             std::env::remove_var("CHROMA_COMPACTION_SERVICE.IRRELEVANT");
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn eligible_backlog_excludes_waiting_and_disabled_collections_but_keeps_active_jobs() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+        f.scheduler.min_compaction_size = 2;
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.eligible_backlog.snapshot().0, 0);
+
+        f.scheduler.min_compaction_size = 1;
+        f.scheduler.disabled_collections.insert(f.collection_uuid_1);
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.eligible_backlog.snapshot().0, 1);
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.eligible_backlog.snapshot().0, 1);
+
+        f.scheduler.succeed_job(f.collection_uuid_2.into());
+        assert_eq!(f.scheduler.eligible_backlog.snapshot().0, 0);
+        f.scheduler.disabled_collections.insert(f.collection_uuid_2);
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.eligible_backlog.snapshot().0, 0);
     }
 
     #[tokio::test]
