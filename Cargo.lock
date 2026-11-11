@@ -1976,6 +1976,7 @@ dependencies = [
  "tracing",
  "uuid",
  "wal3",
+ "worker",
 ]
 
 [[package]]

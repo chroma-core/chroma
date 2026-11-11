@@ -482,8 +482,12 @@ impl BlockManager {
         let delta_id = delta.id();
         let record_batch = delta.finish::<K, V>(None);
         let block = Block::from_record_batch(delta_id, record_batch);
-        self.block_cache.insert(delta_id, block.clone()).await;
+        self.cache_committed_block(&block).await;
         block
+    }
+
+    pub(super) async fn cache_committed_block(&self, block: &Block) {
+        self.block_cache.insert(block.id, block.clone()).await;
     }
 
     pub fn format_key(prefix_path: &str, id: &Uuid) -> String {

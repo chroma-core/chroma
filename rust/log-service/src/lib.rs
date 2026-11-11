@@ -4497,6 +4497,7 @@ pub async fn log_entrypoint() {
 #[cfg(test)]
 mod tests {
     mod cursor_refresh;
+    mod incident_replay;
 
     use std::future::Future;
     use std::pin::Pin;

@@ -51,6 +51,8 @@ pub struct ArrowOrderedBlockfileWriter {
 
 #[derive(Error, Debug)]
 pub enum ArrowBlockfileError {
+    #[error("Could not filter deleted rows")]
+    FilterError(#[from] arrow::error::ArrowError),
     #[error("Could not migrate blockfile to new version")]
     MigrationError(#[from] MigrationError),
 }
@@ -58,6 +60,7 @@ pub enum ArrowBlockfileError {
 impl ChromaError for ArrowBlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
+            ArrowBlockfileError::FilterError(_) => ErrorCodes::Internal,
             ArrowBlockfileError::MigrationError(e) => e.code(),
         }
     }
@@ -195,6 +198,16 @@ impl ArrowOrderedBlockfileWriter {
         let Some((mut delta, _)) = inner.current_block_delta.take() else {
             return Ok(());
         };
+        if let Some(block) = delta
+            .finish_deletions(self.root.max_block_size_bytes)
+            .map_err(|error| {
+                Box::new(ArrowBlockfileError::FilterError(error)) as Box<dyn ChromaError>
+            })?
+        {
+            self.block_manager.cache_committed_block(&block).await;
+            inner.completed_blocks.push(block);
+            return Ok(());
+        }
         delta.copy_to_end::<K, V>();
         if delta.get_size::<K, V>() > self.root.max_block_size_bytes {
             let split_blocks = delta.split::<K, V>(self.root.max_block_size_bytes);
@@ -344,7 +357,9 @@ impl ArrowOrderedBlockfileWriter {
             .advance_current_delta_and_get_inner::<K, V>(prefix, &key)
             .await?;
         let delta = &mut inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
-        delta.skip::<K, V>(prefix, key);
+        delta
+            .skip::<K, V>(prefix, key)
+            .map_err(|error| Box::new(error) as Box<dyn ChromaError>)?;
         Ok(())
     }
 

@@ -472,6 +472,127 @@ mod tests {
     use tantivy::tokenizer::NgramTokenizer;
     use tempfile::tempdir;
 
+    /// Small-scale version of the incident's FTS rewrite workload: a handful of
+    /// scattered document deletes touch common trigrams across large blocks.
+    /// Uses production compactor block settings, with local storage/test caches.
+    #[tokio::test]
+    #[ignore = "local incident amplification benchmark"]
+    async fn test_fts_incident_delete_amplification() {
+        use std::{collections::BTreeMap, time::Instant};
+        fn files(path: &std::path::Path) -> (u64, u64) {
+            std::fs::read_dir(path)
+                .unwrap()
+                .map(|entry| {
+                    let entry = entry.unwrap();
+                    let meta = entry.metadata().unwrap();
+                    if meta.is_dir() {
+                        files(&entry.path())
+                    } else {
+                        (1, meta.len())
+                    }
+                })
+                .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
+        }
+        let records: u32 = std::env::var("FTS_REPRO_RECORDS")
+            .map(|s| s.parse().unwrap())
+            .unwrap_or(32768);
+        let deletes: u32 = std::env::var("FTS_REPRO_DELETES")
+            .map(|s| s.parse().unwrap())
+            .unwrap_or(16);
+        assert!(deletes > 0 && records / deletes >= 3);
+        let (dir, storage) = chroma_storage::test_storage();
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            8 * 1024 * 1024,
+            new_cache_for_test(),
+            new_cache_for_test(),
+            80,
+            0,
+        );
+        let options = || BlockfileWriterOptions::new(String::new()).ordered_mutations();
+        let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+        let document: String = (0..128)
+            .map(|i| char::from(b'a' + ((i * i + i / 7) % 26) as u8))
+            .collect();
+        let mut postings = BTreeMap::<String, Vec<u32>>::new();
+        tokenizer
+            .clone()
+            .token_stream(&document)
+            .process(&mut |token| {
+                postings
+                    .entry(token.text.clone())
+                    .or_default()
+                    .push(token.offset_from as u32);
+            });
+        // Seed the exact posting representation directly to avoid retaining all
+        // documents' token instances just to construct the fixture.
+        let seed = provider.write::<u32, Vec<u32>>(options()).await.unwrap();
+        let mut id = seed.id();
+        for (token, positions) in &postings {
+            for offset in 0..records {
+                seed.set(token, offset, positions.clone()).await.unwrap();
+            }
+        }
+        seed.commit::<u32, Vec<u32>>()
+            .await
+            .unwrap()
+            .flush::<u32, Vec<u32>>()
+            .await
+            .unwrap();
+        eprintln!(
+            "fts fixture: records={records} trigrams={} postings={} files_bytes={:?}",
+            postings.len(),
+            records as usize * postings.len(),
+            files(dir.path())
+        );
+        for round in 0..3 {
+            provider.clear().await.unwrap();
+            let writer = provider
+                .write::<u32, Vec<u32>>(options().fork(id))
+                .await
+                .unwrap();
+            id = writer.id();
+            let mut fts = FullTextIndexWriter::new(writer, tokenizer.clone());
+            let deleted = (0..deletes)
+                .map(|i| i * (records / deletes) + round)
+                .collect::<Vec<_>>();
+            fts.handle_batch(deleted.iter().map(|&offset_id| DocumentMutation::Delete {
+                offset_id,
+                old_document: &document,
+            }))
+            .unwrap();
+            let before = files(dir.path());
+            let start = Instant::now();
+            fts.write_to_blockfiles().await.unwrap();
+            let write = start.elapsed();
+            let flusher = fts.commit().await.unwrap();
+            let commit = start.elapsed() - write;
+            let start = Instant::now();
+            flusher.flush().await.unwrap();
+            let flush = start.elapsed();
+            let after = files(dir.path());
+            eprintln!("fts round={round} deleted_documents={deletes} deleted_postings={} write={write:?} commit={commit:?} flush={flush:?} new_files={} new_bytes={}", deletes as usize * postings.len(), after.0-before.0, after.1-before.1);
+            let reader = provider
+                .read::<u32, &[u32]>(BlockfileReaderOptions::new(id, String::new()))
+                .await
+                .unwrap();
+            for (token, positions) in &postings {
+                let remaining = reader.get_prefix(token).await.unwrap().collect::<Vec<_>>();
+                assert_eq!(
+                    remaining.len(),
+                    records as usize - deletes as usize * (round as usize + 1)
+                );
+                for (offset, actual) in remaining {
+                    assert!(
+                        !(offset % (records / deletes) <= round
+                            && offset / (records / deletes) < deletes)
+                    );
+                    assert_eq!(actual, positions.as_slice());
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_new_writer() {
         let provider = BlockfileProvider::new_memory();
