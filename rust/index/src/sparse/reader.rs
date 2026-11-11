@@ -73,11 +73,32 @@ impl<'me> SparseReader<'me> {
             .await
     }
 
+    pub async fn get_block_maxes_owned(
+        &self,
+        encoded_dimension_id: &str,
+    ) -> Result<Vec<(u32, f32)>, SparseReaderError> {
+        Ok(self
+            .max_reader
+            .get_prefix_owned(encoded_dimension_id)
+            .await?)
+    }
+
+    pub async fn get_offset_values_owned(
+        &self,
+        encoded_dimension_id: &str,
+    ) -> Result<Vec<(u32, f32)>, SparseReaderError> {
+        Ok(self
+            .offset_value_reader
+            .get_prefix_owned(encoded_dimension_id)
+            .await?)
+    }
+
     pub async fn get_dimension_max(&self) -> Result<HashMap<u32, f32>, SparseReaderError> {
         Ok(self
             .max_reader
-            .get_prefix(DIMENSION_PREFIX)
+            .get_prefix_owned(DIMENSION_PREFIX)
             .await?
+            .into_iter()
             .collect())
     }
 

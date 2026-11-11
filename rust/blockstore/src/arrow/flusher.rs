@@ -16,6 +16,7 @@ pub struct ArrowBlockfileFlusher {
     root: RootWriter,
     id: Uuid,
     count: u64,
+    uploaded_entries: usize,
     cmek: Option<Cmek>,
 }
 
@@ -36,8 +37,14 @@ impl ArrowBlockfileFlusher {
             root,
             id,
             count,
+            uploaded_entries: 0,
             cmek,
         }
+    }
+
+    pub(super) fn with_uploaded_entries(mut self, uploaded_entries: usize) -> Self {
+        self.uploaded_entries = uploaded_entries;
+        self
     }
 
     #[allow(clippy::extra_unused_type_parameters)]
@@ -87,8 +94,13 @@ impl ArrowBlockfileFlusher {
         self.count
     }
 
+    #[cfg(test)]
+    pub(super) fn pending_blocks(&self) -> usize {
+        self.blocks.len()
+    }
+
     pub(crate) fn num_entries(&self) -> usize {
-        self.blocks.iter().fold(0, |acc, block| acc + block.len())
+        self.uploaded_entries + self.blocks.iter().map(|block| block.len()).sum::<usize>()
     }
 
     pub(crate) fn prefix_path(&self) -> &str {

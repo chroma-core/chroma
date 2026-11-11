@@ -136,10 +136,7 @@ impl<'me> SparseWriter<'me> {
                     Some((_, updates)) => updates,
                     None => match self.old_reader.as_ref() {
                         Some(reader) => {
-                            let block_max = reader
-                                .get_block_maxes(encoded_dimension)
-                                .await?
-                                .collect::<Vec<_>>();
+                            let block_max = reader.get_block_maxes_owned(encoded_dimension).await?;
                             if block_max.is_empty() {
                                 // Rebuild block max without update
                                 DashMap::new()
@@ -155,7 +152,11 @@ impl<'me> SparseWriter<'me> {
                 offset_update_vec.sort_unstable_by_key(|(offset, _)| *offset);
 
                 let mut offset_values = match self.old_reader.as_ref() {
-                    Some(reader) => reader.get_offset_values(encoded_dimension).await?.collect(),
+                    Some(reader) => reader
+                        .get_offset_values_owned(encoded_dimension)
+                        .await?
+                        .into_iter()
+                        .collect(),
                     None => HashMap::new(),
                 };
 
@@ -261,9 +262,19 @@ mod tests {
         BlockfileWriterOptions,
     };
 
-    #[tokio::test]
-    async fn test_writer_crud_operations() {
+    async fn test_writer_crud_operations_with_controls(
+        owned_reads: bool,
+        incremental_uploads: bool,
+    ) {
         let (_temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+        let chroma_blockstore::provider::BlockfileProvider::ArrowBlockfileProvider(provider) =
+            provider
+        else {
+            panic!("expected Arrow provider")
+        };
+        let provider = chroma_blockstore::provider::BlockfileProvider::ArrowBlockfileProvider(
+            provider.with_compaction_memory_options(owned_reads, incremental_uploads),
+        );
 
         // Setup writers
         let max_writer = provider
@@ -520,11 +531,21 @@ mod tests {
     /// dimensions not modified in the current batch. Before the fix, the fresh
     /// (non-forked) max_writer would only contain block-max entries for dimensions
     /// in the delta, causing WAND to skip all other dimensions and return 0 results.
-    #[tokio::test]
-    async fn test_incremental_commit_preserves_block_maxes() {
+    async fn test_incremental_commit_preserves_block_maxes_with_controls(
+        owned_reads: bool,
+        incremental_uploads: bool,
+    ) {
         use chroma_types::SignedRoaringBitmap;
 
         let (_temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+        let chroma_blockstore::provider::BlockfileProvider::ArrowBlockfileProvider(provider) =
+            provider
+        else {
+            panic!("expected Arrow provider")
+        };
+        let provider = chroma_blockstore::provider::BlockfileProvider::ArrowBlockfileProvider(
+            provider.with_compaction_memory_options(owned_reads, incremental_uploads),
+        );
 
         // =====================================================================
         // Batch 1: Write vectors touching dimensions {1, 2, 3}
@@ -686,13 +707,23 @@ mod tests {
     /// copied forward from the old reader via get_block_maxes() -> get_prefix().
     /// get_prefix() must return entries in sorted key order; otherwise the ordered
     /// max_writer panics on out-of-order keys.
-    #[tokio::test]
-    async fn test_incremental_commit_multiblock_block_maxes_ordering() {
+    async fn test_incremental_commit_multiblock_block_maxes_ordering_with_controls(
+        owned_reads: bool,
+        incremental_uploads: bool,
+    ) {
         use chroma_types::SignedRoaringBitmap;
 
         // Use the small test block size (16KB) so we can span multiple blocks
         // without needing millions of entries.
         let (_temp_dir, provider) = test_arrow_blockfile_provider(1024);
+        let chroma_blockstore::provider::BlockfileProvider::ArrowBlockfileProvider(provider) =
+            provider
+        else {
+            panic!("expected Arrow provider")
+        };
+        let provider = chroma_blockstore::provider::BlockfileProvider::ArrowBlockfileProvider(
+            provider.with_compaction_memory_options(owned_reads, incremental_uploads),
+        );
 
         let num_offsets: u32 = 2000;
         let sparse_block_size: u32 = 2;
@@ -824,5 +855,48 @@ mod tests {
             !results.is_empty(),
             "WAND on dimension 1 should return results after incremental commit"
         );
+    }
+    #[cfg(test)]
+    #[tokio::test]
+    async fn test_writer_crud_operations() {
+        for (owned_reads, incremental_uploads) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            Box::pin(test_writer_crud_operations_with_controls(
+                owned_reads,
+                incremental_uploads,
+            ))
+            .await;
+        }
+    }
+
+    #[cfg(test)]
+    #[tokio::test]
+    async fn test_incremental_commit_preserves_block_maxes() {
+        for (owned_reads, incremental_uploads) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            Box::pin(test_incremental_commit_preserves_block_maxes_with_controls(
+                owned_reads,
+                incremental_uploads,
+            ))
+            .await;
+        }
+    }
+
+    #[cfg(test)]
+    #[tokio::test]
+    async fn test_incremental_commit_multiblock_block_maxes_ordering() {
+        for (owned_reads, incremental_uploads) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            Box::pin(
+                test_incremental_commit_multiblock_block_maxes_ordering_with_controls(
+                    owned_reads,
+                    incremental_uploads,
+                ),
+            )
+            .await;
+        }
     }
 }
