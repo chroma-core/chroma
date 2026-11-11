@@ -509,9 +509,12 @@ impl SqliteSysDb {
         if let Some(configuration) = configuration {
             let collections = self
                 .get_collections_with_conn(&mut *tx, Some(collection_id), None, None, None, None, 0)
-                .await;
-            let collections = collections.unwrap();
-            let collection = collections.into_iter().next().unwrap();
+                .await
+                .map_err(|e| UpdateCollectionError::Internal(e.boxed()))?;
+            let collection = collections
+                .into_iter()
+                .next()
+                .ok_or_else(|| UpdateCollectionError::NotFound(collection_id.to_string()))?;
             // if schema exists, update schema instead of configuration
             if let Some(mut existing_schema) = collection.schema {
                 existing_schema.update(&configuration);
@@ -1816,6 +1819,38 @@ mod tests {
                 assert_eq!(hnsw.ef_search, 10);
             }
             _ => panic!("Expected HNSW configuration"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_collection_not_found_on_configuration_update() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+
+        let nonexistent_id = CollectionUuid::new();
+        let res = sysdb
+            .update_collection(
+                nonexistent_id,
+                None,
+                None,
+                None,
+                Some(InternalUpdateCollectionConfiguration {
+                    vector_index: Some(UpdateVectorIndexConfiguration::Hnsw(Some(
+                        UpdateHnswConfiguration {
+                            ef_search: Some(10),
+                            ..Default::default()
+                        },
+                    ))),
+                    embedding_function: None,
+                }),
+            )
+            .await;
+
+        match res {
+            Err(UpdateCollectionError::NotFound(id)) => {
+                assert_eq!(id, nonexistent_id.to_string());
+            }
+            other => panic!("Expected UpdateCollectionError::NotFound, got {:?}", other),
         }
     }
 
