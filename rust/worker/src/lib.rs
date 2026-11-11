@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+mod compaction_diagnostics;
 mod compactor;
 pub mod fn_consumer;
 mod server;
@@ -100,11 +101,26 @@ pub async fn compaction_service_entrypoint() {
     let config = config.compaction_service;
     let registry = Registry::new();
 
-    chroma_tracing::init_otel_tracing(
-        &config.service_name,
-        &config.otel_filters,
-        &config.otel_endpoint,
-    );
+    if let Some(interval) = config.diagnostics_interval_seconds.filter(|v| *v > 0) {
+        use chroma_tracing::compaction_diagnostics::CompactionDiagnostics;
+        use tracing_subscriber::Layer;
+        let diagnostics = CompactionDiagnostics::new()
+            .with_allocator_stats(compaction_diagnostics::allocator_stats);
+        chroma_tracing::init_tracing(vec![
+            chroma_tracing::init_global_filter_layer(&config.otel_filters),
+            chroma_tracing::init_otel_layer(&config.service_name, &config.otel_endpoint),
+            chroma_tracing::init_stdout_layer(),
+            diagnostics.clone().boxed(),
+        ]);
+        chroma_tracing::init_panic_tracing_hook();
+        tokio::spawn(diagnostics.report(interval));
+    } else {
+        chroma_tracing::init_otel_tracing(
+            &config.service_name,
+            &config.otel_filters,
+            &config.otel_endpoint,
+        );
+    }
 
     let system = chroma_system::System::new();
 

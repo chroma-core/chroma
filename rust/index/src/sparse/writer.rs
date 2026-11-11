@@ -127,10 +127,18 @@ impl<'me> SparseWriter<'me> {
         );
 
         async {
+            let phase = tracing::Span::current();
+            phase.record("diagnostic.dimensions", encoded_dimensions.len() as u64);
+            phase.record("diagnostic.pending_dimensions", self.delta.len() as u64);
+            let mut dimensions_processed = 0_u64;
+            let mut max_postings = 0_u64;
             for (encoded_dimension, dimension_id) in &encoded_dimensions {
                 if encoded_dimension == DIMENSION_PREFIX {
                     continue;
                 }
+                dimensions_processed += 1;
+                phase.record("diagnostic.dimensions_processed", dimensions_processed);
+                phase.record("diagnostic.dimension_id", u64::from(*dimension_id));
 
                 let offset_updates = match self.delta.remove(dimension_id) {
                     Some((_, updates)) => updates,
@@ -154,10 +162,13 @@ impl<'me> SparseWriter<'me> {
                 let mut offset_update_vec = offset_updates.into_iter().collect::<Vec<_>>();
                 offset_update_vec.sort_unstable_by_key(|(offset, _)| *offset);
 
-                let mut offset_values = match self.old_reader.as_ref() {
+                let mut offset_values: HashMap<u32, f32> = match self.old_reader.as_ref() {
                     Some(reader) => reader.get_offset_values(encoded_dimension).await?.collect(),
                     None => HashMap::new(),
                 };
+                max_postings = max_postings.max(offset_values.len() as u64);
+                phase.record("diagnostic.max_old_postings", max_postings);
+                phase.record("diagnostic.pending_dimensions", self.delta.len() as u64);
 
                 for (offset, update) in offset_update_vec {
                     match update {
@@ -203,7 +214,12 @@ impl<'me> SparseWriter<'me> {
             Ok::<_, SparseWriterError>(())
         }
         .instrument(tracing::trace_span!(
-            "Write offset values and compute block maxes"
+            "Write offset values and compute block maxes",
+            diagnostic.dimensions = tracing::field::Empty,
+            diagnostic.dimensions_processed = tracing::field::Empty,
+            diagnostic.dimension_id = tracing::field::Empty,
+            diagnostic.max_old_postings = tracing::field::Empty,
+            diagnostic.pending_dimensions = tracing::field::Empty,
         ))
         .await?;
 

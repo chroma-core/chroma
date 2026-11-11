@@ -61,6 +61,7 @@ flatbuffers = { workspace = true }
 tantivy = { workspace = true }
 clap = { workspace = true }
 tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
 sprs = { workspace = true }
 
 chroma-blockstore = { workspace = true }
@@ -92,6 +93,9 @@ random-port = { workspace = true }
 serial_test = { workspace = true }
 criterion = { workspace = true }
 indicatif = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 shuttle = { workspace = true }

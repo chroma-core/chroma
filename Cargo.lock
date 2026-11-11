@@ -11664,6 +11664,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "thiserror 1.0.69",
+ "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "tokio",
  "tokio-util",
@@ -11672,6 +11673,7 @@ dependencies = [
  "tower 0.5.3",
  "tracing",
  "tracing-opentelemetry",
+ "tracing-subscriber",
  "uuid",
  "wal3",
 ]
