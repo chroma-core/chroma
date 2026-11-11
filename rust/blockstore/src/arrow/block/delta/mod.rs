@@ -1,6 +1,9 @@
 mod builder_storage;
 pub(super) mod data_record;
 pub(super) mod data_record_size_tracker;
+pub(super) mod hierarchical_internal_node_delta;
+pub(super) mod hierarchical_leaf_node_delta;
+pub(super) mod hierarchical_posting_list_delta;
 mod ordered_block_delta;
 pub(super) mod quantized_cluster_delta;
 pub(super) mod single_column_size_tracker;
