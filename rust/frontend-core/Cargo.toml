@@ -13,6 +13,7 @@ mdac = { workspace = true }
 opentelemetry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
@@ -29,4 +30,5 @@ chroma-tracing = { workspace = true, features = ["middleware"] }
 chroma-types = { workspace = true, features = ["utoipa"] }
 
 [dev-dependencies]
+chroma-auth-service = { workspace = true }
 serde_json = { workspace = true }

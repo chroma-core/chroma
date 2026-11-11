@@ -1,0 +1,37 @@
+# Run after the auth service and the frontend using it are ready.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chroma-install-tenant
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: install
+          image: chroma-auth-service:latest
+          args: ["install-tenant", "--frontend-url", "http://rust-frontend:8000"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/chroma-auth
+              readOnly: true
+      volumes:
+        - name: config
+          secret:
+            secretName: chroma-auth-service
+            defaultMode: 0440

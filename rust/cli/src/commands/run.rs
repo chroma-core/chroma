@@ -1,6 +1,7 @@
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::{HOLIDAY_LOGO, LOGO};
 use crate::utils::CliError;
+use chroma_frontend::auth::{AuthenticateAndAuthorize, DashboardAuth};
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use chrono::{Datelike, Local};
@@ -138,7 +139,12 @@ pub fn run(args: RunArgs) -> Result<(), CliError> {
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| RunError::ServerStartFailed)?;
     runtime.block_on(async {
-        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
+        let auth: Arc<dyn AuthenticateAndAuthorize> =
+            match DashboardAuth::from_env().expect("Invalid dashboard auth configuration") {
+                Some(auth) => Arc::new(auth),
+                None => Arc::new(()),
+            };
+        frontend_service_entrypoint_with_config(auth, Arc::new(()), &config, true).await;
     });
     Ok(())
 }

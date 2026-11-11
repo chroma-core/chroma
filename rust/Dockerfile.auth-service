@@ -1,0 +1,16 @@
+# Build from the repository root.
+FROM rust:1.92.0-trixie AS builder
+WORKDIR /chroma
+COPY Cargo.toml Cargo.lock ./
+COPY rust/ rust/
+COPY idl/ idl/
+RUN cargo build --locked --release -p chroma-auth-service
+
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /chroma/target/release/chroma-auth-service /usr/local/bin/
+USER 65532:65532
+EXPOSE 8002
+ENTRYPOINT ["chroma-auth-service"]
+CMD ["serve"]

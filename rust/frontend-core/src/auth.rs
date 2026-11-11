@@ -10,6 +10,9 @@ use chroma_api_types::GetUserIdentityResponse;
 use chroma_types::Collection;
 use serde::Serialize;
 
+mod dashboard;
+pub use dashboard::DashboardAuth;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthzAction {
