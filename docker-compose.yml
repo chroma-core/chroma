@@ -19,6 +19,7 @@ services:
       # Read more about deployments: https://docs.trychroma.com/deployment
       - chroma-data:/data
     environment:
+      - IS_PERSISTENT=TRUE
       - CHROMA_OPEN_TELEMETRY__ENDPOINT=${CHROMA_OPEN_TELEMETRY__ENDPOINT}
       - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=${CHROMA_OPEN_TELEMETRY__SERVICE_NAME}
       - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
