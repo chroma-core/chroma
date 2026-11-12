@@ -1,6 +1,12 @@
 import pytest
 from typing import List, cast, Dict, Any
-from chromadb.api.types import Documents, Image, Document, Embeddings
+from chromadb.api.types import (
+    Documents,
+    Image,
+    Document,
+    Embeddings,
+    validate_n_results,
+)
 from chromadb.utils.embedding_functions import (
     EmbeddingFunction,
     register_embedding_function,
@@ -103,3 +109,9 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+@pytest.mark.parametrize("n_results", [True, False])
+def test_validate_n_results_rejects_bool(n_results: bool) -> None:
+    with pytest.raises(ValueError, match="Expected requested number of results"):
+        validate_n_results(n_results)
