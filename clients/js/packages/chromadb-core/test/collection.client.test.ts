@@ -94,10 +94,10 @@ describe("collection operations", () => {
   test("it should delete a collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     let collections = await client.listCollections();
-    expect(collections.length).toBe(1);
+    expect(collections).toHaveLength(1);
     await client.deleteCollection({ name: "test" });
     collections = await client.listCollections();
-    expect(collections.length).toBe(0);
+    expect(collections).toHaveLength(0);
   });
 
   // TODO: I want to test this, but I am not sure how to
