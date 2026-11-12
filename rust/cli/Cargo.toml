@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 arboard = "3.4.1"
+backon = { workspace = true }
 bytes = { workspace = true }
 clap = { version = "4.5.28", features = ["derive"] }
 chroma = { workspace = true }
