@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 from tenacity import retry, stop_after_attempt, retry_if_exception, wait_fixed
 from chromadb.api import ServerAPI
+from chromadb.api.types import IndexingStatus
 
 if TYPE_CHECKING:
     from chromadb.api.models.AttachedFunction import AttachedFunction
