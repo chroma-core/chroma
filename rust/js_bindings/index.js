@@ -310,6 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { cli } = nativeBinding
+const { cli, Bindings } = nativeBinding
 
 module.exports.cli = cli
+module.exports.Bindings = Bindings
