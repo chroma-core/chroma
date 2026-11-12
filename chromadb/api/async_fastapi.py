@@ -176,7 +176,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
     async def heartbeat(self) -> int:
-        response = await self._make_request("get", "")
+        """Returns the current server time in nanoseconds to check if the server is alive"""
+        response = await self._make_request("get", "/heartbeat")
         return int(response["nanosecond heartbeat"])
 
     @trace_method("AsyncFastAPI.create_database", OpenTelemetryGranularity.OPERATION)
