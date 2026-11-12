@@ -14,6 +14,7 @@ param_validators: Dict[str, Validator] = {
     "hnsw:M": lambda p: isinstance(p, int),
     "hnsw:num_threads": lambda p: isinstance(p, int),
     "hnsw:resize_factor": lambda p: isinstance(p, (int, float)),
+    "hnsw:initial_capacity": lambda p: isinstance(p, int) and p > 0,
 }
 
 # Extra params used for persistent hnsw
@@ -50,6 +51,7 @@ class HnswParams(Params):
     M: int
     num_threads: int
     resize_factor: float
+    initial_capacity: int
 
     def __init__(self, metadata: Metadata):
         metadata = metadata or {}
@@ -61,6 +63,7 @@ class HnswParams(Params):
             metadata.get("hnsw:num_threads", multiprocessing.cpu_count())
         )
         self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
+        self.initial_capacity = int(metadata.get("hnsw:initial_capacity", 1000))
 
     @staticmethod
     def extract(metadata: Metadata) -> Metadata:
