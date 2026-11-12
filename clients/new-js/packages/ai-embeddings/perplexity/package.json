@@ -21,6 +21,8 @@
   },
   "files": [
     "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.spec.ts",
     "dist"
   ],
   "scripts": {
