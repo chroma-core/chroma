@@ -286,8 +286,9 @@ jobs:
       - name: Cargo fmt check
         shell: bash
         run: cargo fmt -- --check
+      # Clippy 1.99 treats async_trait's generated must-use attribute on futures as redundant.
       - name: Clippy
-        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings -D clippy::large_futures -D clippy::all
+        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings -D clippy::large_futures -D clippy::all -A clippy::double_must_use
 
   # This job exists for our branch protection rule.
   # We want to require status checks to pass before merging, but the set of

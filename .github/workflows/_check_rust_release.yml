@@ -25,11 +25,12 @@ jobs:
           github-token: ${{ github.token }}
       - name: Install cargo hack
         run: cargo install cargo-hack
+      # Clippy 1.99 treats async_trait's generated must-use attribute on futures as redundant.
       - name: Check chroma-error
-        run: cargo hack clippy -p chroma-error --all-targets --feature-powerset -- -D clippy::all
+        run: cargo hack clippy -p chroma-error --all-targets --feature-powerset -- -D clippy::all -A clippy::double_must_use
       - name: Check chroma-api-types
-        run: cargo hack clippy -p chroma-api-types --all-targets --feature-powerset -- -D clippy::all
+        run: cargo hack clippy -p chroma-api-types --all-targets --feature-powerset -- -D clippy::all -A clippy::double_must_use
       - name: Check chroma-types
-        run: cargo hack clippy -p chroma-types --all-targets --feature-powerset -- -D clippy::all
+        run: cargo hack clippy -p chroma-types --all-targets --feature-powerset -- -D clippy::all -A clippy::double_must_use
       - name: Check chroma
-        run: cargo hack clippy -p chroma --all-targets --feature-powerset -- -D clippy::all
+        run: cargo hack clippy -p chroma --all-targets --feature-powerset -- -D clippy::all -A clippy::double_must_use
