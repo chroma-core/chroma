@@ -238,7 +238,7 @@ class Settings(BaseSettings):  # type: ignore
     migrations: Literal["none", "validate", "apply"] = "apply"
     # you cannot change the hash_algorithm after migrations have already
     # been applied once this is intended to be a first-time setup configuration
-    migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
+    migrations_hash_algorithm: Literal["md5", "sha256"] = "sha256"
 
     # ==================
     # Distributed Chroma
