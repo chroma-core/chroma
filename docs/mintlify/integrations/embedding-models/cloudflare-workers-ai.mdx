@@ -28,8 +28,8 @@ import { CloudflareWorkersAIEmbeddingFunction } from '@chroma-core/cloudflare-wo
 process.env.CLOUDFLARE_API_KEY = "<INSERT API KEY HERE>"
 
 const embedder = new CloudflareWorkersAIEmbeddingFunction({
-    account_id="<INSERT ACCOUNT ID HERE>",
-    model_name="@cf/baai/bge-m3",
+    account_id: "<INSERT ACCOUNT ID HERE>",
+    model_name: "@cf/baai/bge-m3",
 });
 
 // use directly
