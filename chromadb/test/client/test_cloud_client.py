@@ -42,6 +42,40 @@ def test_valid_key() -> None:
         assert client.heartbeat() == 1234567890
 
 
+def test_cloud_client_reads_env_vars_for_auth_and_scope() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "CHROMA_API_KEY": "env_token",
+            "CHROMA_TENANT": "default_tenant",
+            "CHROMA_DATABASE": "testdb",
+        },
+        clear=False,
+    ), patch("chromadb.api.fastapi.FastAPI.get_user_identity") as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database, patch(
+        "chromadb.api.fastapi.FastAPI.heartbeat"
+    ) as mock_heartbeat:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="default_tenant", databases=["testdb"]
+        )
+        mock_get_tenant.return_value = Tenant(name="default_tenant")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="testdb", tenant="default_tenant"
+        )
+        mock_heartbeat.return_value = 1234567890
+
+        client = CloudClient()
+
+        settings = client.get_settings()
+        assert settings.chroma_client_auth_credentials == "env_token"
+        assert client.tenant == "default_tenant"
+        assert client.database == "testdb"
+        assert client.heartbeat() == 1234567890
+
+
 def test_invalid_key() -> None:
     with patch(
         "chromadb.api.fastapi.FastAPI.get_user_identity"
