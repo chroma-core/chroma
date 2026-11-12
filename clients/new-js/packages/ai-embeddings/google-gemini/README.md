@@ -17,7 +17,7 @@ import { GoogleGeminiEmbeddingFunction } from '@chroma-core/google-gemini';
 // Initialize the embedder
 const embedder = new GoogleGeminiEmbeddingFunction({
   apiKey: 'your-api-key', // Or set GEMINI_API_KEY env var
-  modelName: 'text-embedding-004', // Optional, defaults to latest model
+  modelName: 'gemini-embedding-001', // Optional, defaults to latest model
   taskType: 'RETRIEVAL_DOCUMENT', // Optional
 });
 
@@ -64,7 +64,7 @@ Get your API key from the [Google AI Studio](https://aistudio.google.com/app/api
 
 ## Supported Models
 
-- `text-embedding-004` (latest)
-- `embedding-001`
+- `gemini-embedding-001` (latest)
+- `text-embedding-004` (deprecated)
 
 Check the [Google AI documentation](https://ai.google.dev/models/gemini) for the most up-to-date list of available embedding models.
