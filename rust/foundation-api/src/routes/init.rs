@@ -65,8 +65,8 @@ pub struct FoundationInitParams {
     pub mock_wiki: bool,
 }
 
-/// `POST /api/init` — idempotent bootstrap for a team's Foundation
-/// workspace. Ensures the configured Foundation database and the wiki +
+/// Idempotent bootstrap at the explicit default-Foundation `/init` route and
+/// the temporary `/api/init` compatibility route. Ensures the default database and the wiki +
 /// wiki_revisions collections (names overridable via
 /// `CHROMA_FOUNDATION__*` env vars) exist in the tenant resolved from the
 /// auth context. Pass `?mock_wiki=true` to select the separately configured
@@ -79,13 +79,25 @@ pub async fn foundation_init(
     Path(scope): Path<FoundationScope>,
     Query(params): Query<FoundationInitParams>,
 ) -> Result<Json<FoundationInitResponse>, ServerError> {
+    // The initialization permission is intentionally enough to adopt the
+    // configured default Foundation, but not to create arbitrary databases.
+    // The named-Foundation creation route checks CreateDatabase separately.
+    if let Some(name) = scope.foundation.as_deref() {
+        if name != server.config.foundation.database_name {
+            return Err(FoundationInitError::NonDefaultFoundation.into());
+        }
+    }
     let (tenant, database, identity) = authorize_scope(
         &*server.auth,
         &headers,
         AuthzAction::InitFoundation,
         &scope,
         &server.config.foundation.database_name,
-        ScopePolicy::DefaultToConfig,
+        if scope.foundation.is_some() {
+            ScopePolicy::Required
+        } else {
+            ScopePolicy::DefaultToConfig
+        },
     )
     .await?;
     // The workspace belongs to the tenant in the path, but the owner recorded
@@ -785,6 +797,8 @@ fn foundation_currents_attached_function_name() -> String {
 pub(crate) enum FoundationInitError {
     #[error("Foundation provisioning is temporarily paused for maintenance; retry later")]
     ProvisioningPaused,
+    #[error("this route initializes only the configured default Foundation")]
+    NonDefaultFoundation,
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
 }
@@ -793,7 +807,8 @@ impl ChromaError for FoundationInitError {
     fn code(&self) -> ErrorCodes {
         match self {
             FoundationInitError::ProvisioningPaused => ErrorCodes::Unavailable,
-            FoundationInitError::DatabaseNameTooShort => ErrorCodes::InvalidArgument,
+            FoundationInitError::DatabaseNameTooShort
+            | FoundationInitError::NonDefaultFoundation => ErrorCodes::InvalidArgument,
         }
     }
 }

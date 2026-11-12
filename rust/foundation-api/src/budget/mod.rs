@@ -100,6 +100,7 @@ impl BudgetClient {
         &self,
         token: &str,
         tenant: &str,
+        database_name: &str,
         ref_id: &str,
         planner_model: &str,
         usage: &[InferenceUsage],
@@ -118,6 +119,7 @@ impl BudgetClient {
         }
         let body = serde_json::json!({
             "tenant": tenant,
+            "database_name": database_name,
             "spend_class": "query",
             "source": "agent_query",
             "amount_micros": i64::try_from(amount_micros).unwrap_or(i64::MAX),
@@ -158,11 +160,17 @@ pub(crate) struct QueryDebit {
 }
 
 impl QueryDebit {
-    pub(crate) async fn post(self, tenant: String, usage: Vec<InferenceUsage>) {
+    pub(crate) async fn post(
+        self,
+        tenant: String,
+        database_name: String,
+        usage: Vec<InferenceUsage>,
+    ) {
         self.client
             .debit_agent_query(
                 &self.token,
                 &tenant,
+                &database_name,
                 &self.ref_id,
                 &self.planner_model,
                 &usage,

@@ -4,12 +4,20 @@
 //! (the resource identifier and the authorization server) advertised to MCP
 //! clients during OAuth discovery.
 
-use axum::{extract::State, Json};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
 use serde::Serialize;
 
 use crate::{config::FoundationApiConfig, server::FoundationApiServer};
 
-use super::{FOUNDATION_SCOPE, MCP_PATH};
+use super::{FOUNDATION_SCOPE, MCP_PATH, MCP_SCOPED_PATH};
+use crate::routes::{
+    whoami::{validate_foundation_name, validate_path_tenant},
+    FoundationScope,
+};
 
 #[derive(Debug, Serialize)]
 pub(super) struct ProtectedResourceMetadata {
@@ -22,6 +30,41 @@ pub(super) async fn protected_resource_metadata(
     State(server): State<FoundationApiServer>,
 ) -> Json<ProtectedResourceMetadata> {
     Json(protected_resource_metadata_doc(&server.config))
+}
+
+/// Discovery for an explicitly named default Foundation. The tenant and name
+/// are validated before they are placed in the advertised resource URL.
+pub(super) async fn explicit_protected_resource_metadata(
+    State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
+) -> Result<Json<ProtectedResourceMetadata>, StatusCode> {
+    let (Some(tenant), Some(foundation)) = (scope.tenant, scope.foundation) else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+    validate_path_tenant(&tenant).map_err(|_| StatusCode::BAD_REQUEST)?;
+    validate_foundation_name(&foundation).map_err(|_| StatusCode::BAD_REQUEST)?;
+    if foundation != server.config.foundation.database_name {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(Json(ProtectedResourceMetadata {
+        resource: explicit_mcp_resource_url(&server.config, &tenant, &foundation),
+        authorization_servers: vec![mcp_authorization_server_url(&server.config)],
+        scopes_supported: vec![FOUNDATION_SCOPE.to_string()],
+    }))
+}
+
+pub(super) fn explicit_mcp_resource_url(
+    config: &FoundationApiConfig,
+    tenant: &str,
+    foundation: &str,
+) -> String {
+    format!(
+        "{}{path}",
+        mcp_resource_origin(config),
+        path = MCP_SCOPED_PATH
+            .replace("{tenant}", tenant)
+            .replace("{foundation}", foundation)
+    )
 }
 
 /// Builds the protected-resource metadata document advertised at

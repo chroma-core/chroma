@@ -457,7 +457,7 @@ fn drive_agent(
                 tenant = %tenant,
                 ref_id = %debit.ref_id,
             );
-            tokio::spawn(debit.post(tenant.clone(), usage).instrument(span));
+            tokio::spawn(debit.post(tenant.clone(), database.clone(), usage).instrument(span));
         }
         yield AgentSseEvent::Done { final_text };
     }
