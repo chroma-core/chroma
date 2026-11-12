@@ -35,7 +35,7 @@ def get_schema_info() -> Dict[str, Dict[str, str]]:
     schema_info = {}
     for schema_name in get_available_schemas():
         schema_path = os.path.join(SCHEMAS_DIR, f"{schema_name}.json")
-        with open(schema_path, "r") as f:
+        with open(schema_path, "r", encoding="utf-8") as f:
             schema = json.load(f)
             schema_info[schema_name] = {
                 "version": schema.get("version", "1.0.0"),
