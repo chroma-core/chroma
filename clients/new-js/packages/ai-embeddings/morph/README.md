@@ -59,5 +59,5 @@ export MORPH_API_KEY="your-morph-api-key"
 ## API Reference
 
 For more information about Morph's embedding models and API, visit:
-- [Morph Embedding API Documentation](https://docs.morphllm.com/api-reference/endpoint/embedding)
+- [Morph API Documentation](https://docs.morphllm.com/introduction)
 - [Morph Website](https://morphllm.com/)
