@@ -4,7 +4,7 @@ import logging
 import os
 import tarfile
 import sys
-from functools import cached_property
+from functools import cached_property, partial
 from pathlib import Path
 from typing import List, Dict, Any, Optional, cast
 
@@ -14,6 +14,7 @@ import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction, Space
+from chromadb.utils import LazyClassAttribute
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,10 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
     return sha256_hash.hexdigest() == expected_sha256
 
 
+def _default_download_path(model_name: str) -> Path:
+    return Path.home() / ".cache" / "chroma" / "onnx_models" / model_name
+
+
 # In order to remove dependencies on sentence-transformers, which in turn depends on
 # pytorch and sentence-piece we have created a default ONNX embedding function that
 # implements the same functionality as "all-MiniLM-L6-v2" from sentence-transformers.
@@ -36,7 +41,12 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
 # and verify the ONNX model.
 class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_NAME = "all-MiniLM-L6-v2"
-    DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
+    # Resolved on first use, not at import time: Path.home() raises when
+    # $HOME is unset and the uid has no passwd entry, which would break
+    # `import chromadb` in containers that never use this embedding function.
+    DOWNLOAD_PATH: Path = LazyClassAttribute(  # type: ignore[assignment]
+        partial(_default_download_path, MODEL_NAME)
+    )
     EXTRACTED_FOLDER_NAME = "onnx"
     ARCHIVE_FILENAME = "onnx.tar.gz"
     MODEL_DOWNLOAD_URL = (
