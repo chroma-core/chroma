@@ -838,19 +838,6 @@ export type ValueTypes = {
     string?: null | StringValueType;
 };
 
-export type Vec = Array<{
-    configuration_json: CollectionConfiguration;
-    database: string;
-    dimension?: number | null;
-    id: CollectionUuid;
-    log_position: number;
-    metadata?: null | HashMap;
-    name: string;
-    schema?: null | Schema;
-    tenant: string;
-    version: number;
-}>;
-
 export type VectorIndexConfig = {
     embedding_function?: null | EmbeddingFunctionConfiguration;
     hnsw?: null | HnswIndexConfig;
@@ -1183,7 +1170,7 @@ export type ListDatabasesResponses = {
     /**
      * List of databases
      */
-    200: Vec;
+    200: Array<Database>;
 };
 
 export type ListDatabasesResponse = ListDatabasesResponses[keyof ListDatabasesResponses];
@@ -1412,7 +1399,7 @@ export type ListCollectionsResponses = {
     /**
      * List of collections
      */
-    200: Vec;
+    200: Array<Collection>;
 };
 
 export type ListCollectionsResponse = ListCollectionsResponses[keyof ListCollectionsResponses];
