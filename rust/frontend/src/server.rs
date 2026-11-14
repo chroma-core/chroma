@@ -24,7 +24,7 @@ use chroma_types::{
     ConditionalGetRequestPayload, ConditionalGetResponse, ConditionalTransactionOperationPayload,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, Database, DatabaseName,
     DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
     DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
     ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
@@ -853,7 +853,7 @@ struct ListDatabasesParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of databases", body = ListDatabasesResponse),
+        (status = 200, description = "List of databases", body = Vec<Database>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -1159,7 +1159,7 @@ struct ListCollectionsParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of collections", body = ListCollectionsResponse),
+        (status = 200, description = "List of collections", body = Vec<Collection>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -4535,5 +4535,38 @@ mod tests {
             "multi-region databases do not support attached functions",
         )
         .await;
+    }
+
+    #[test]
+    fn test_list_databases_and_collections_openapi_schema() {
+        use utoipa::OpenApi;
+
+        let openapi = super::ApiDoc::openapi();
+        let json = serde_json::to_value(&openapi).expect("serialize openapi to json");
+
+        // The schemas should not define a generic "Vec" schema.
+        assert!(
+            json["components"]["schemas"].get("Vec").is_none(),
+            "OpenAPI schemas should not contain a 'Vec' schema component"
+        );
+
+        // GET /api/v2/tenants/{tenant}/databases should return an array of Database
+        let list_databases_schema = &json["paths"]["/api/v2/tenants/{tenant}/databases"]["get"]
+            ["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(list_databases_schema["type"], "array");
+        assert_eq!(
+            list_databases_schema["items"]["$ref"],
+            "#/components/schemas/Database"
+        );
+
+        // GET /api/v2/tenants/{tenant}/databases/{database}/collections should return an array of Collection
+        let list_collections_schema = &json["paths"]
+            ["/api/v2/tenants/{tenant}/databases/{database}/collections"]["get"]["responses"]
+            ["200"]["content"]["application/json"]["schema"];
+        assert_eq!(list_collections_schema["type"], "array");
+        assert_eq!(
+            list_collections_schema["items"]["$ref"],
+            "#/components/schemas/Collection"
+        );
     }
 }
