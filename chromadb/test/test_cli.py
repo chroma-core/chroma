@@ -3,6 +3,7 @@ import multiprocessing.context
 import sys
 import time
 from multiprocessing.synchronize import Event
+from unittest.mock import patch
 
 import chromadb
 from chromadb.api.client import Client
@@ -155,3 +156,27 @@ def test_vacuum_errors_if_locked(sqlite_persistent: System, capfd) -> None:
     finally:
         shutdown_event.set()
         process.join()
+
+
+def test_update_subcommand_runs_python_update() -> None:
+    # The console script is invoked with an absolute path, so argv[0] is not
+    # the bare string "chroma".
+    for prog in ["chroma", "/usr/local/bin/chroma"]:
+        with patch("sys.argv", [prog, "update"]), patch.object(
+            cli, "update"
+        ) as update, patch.object(cli.chromadb_rust_bindings, "cli") as rust_cli:
+            cli.app()
+
+        update.assert_called_once_with()
+        rust_cli.assert_not_called()
+
+
+def test_other_subcommands_are_forwarded_to_rust_cli() -> None:
+    argv = ["/usr/local/bin/chroma", "run", "--path", "update"]
+    with patch("sys.argv", argv), patch.object(cli, "update") as update, patch.object(
+        cli.chromadb_rust_bindings, "cli"
+    ) as rust_cli:
+        cli.app()
+
+    update.assert_not_called()
+    rust_cli.assert_called_once_with(argv)

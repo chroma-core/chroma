@@ -47,7 +47,7 @@ def update():
 
 def app():
     args = sys.argv
-    if ["chroma", "update"] in args:
+    if len(args) > 1 and args[1] == "update":
         update()
         return
     try:
