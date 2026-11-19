@@ -3,9 +3,12 @@ import os
 from typing import List
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, omit
 from openai.types.chat import ChatCompletionMessageParam
 import chromadb
+
+
+DEFAULT_MODEL = "gpt-6-luna"
 
 
 def build_prompt(query: str, context: List[str]) -> List[ChatCompletionMessageParam]:
@@ -58,6 +61,7 @@ def get_chatGPT_response(query: str, context: List[str], model_name: str) -> str
     response = client.chat.completions.create(
         model=model_name,
         messages=build_prompt(query, context),
+        reasoning_effort="none" if model_name == DEFAULT_MODEL else omit,
     )
 
     return response.choices[0].message.content  # type: ignore
@@ -76,8 +80,11 @@ def main(
         return
 
     # Ask what model to use
-    model_name = "gpt-4o-mini"
-    change_model = input(f"This program is using the GPT-4o-mini model. Do you want to use a different model? (y/n): ")
+    model_name = DEFAULT_MODEL
+    change_model = input(
+        f"This program is using {model_name}. "
+        "Do you want to use a different model? (y/n): "
+    )
     if change_model == "y":
         model_name = input("Please enter your desired model: ")
 
