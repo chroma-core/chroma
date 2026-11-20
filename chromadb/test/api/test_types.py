@@ -1,11 +1,48 @@
 import pytest
+import chromadb
 from typing import List, cast, Dict, Any
-from chromadb.api.types import Documents, Image, Document, Embeddings
+from chromadb.api.types import Documents, Image, Document, Embeddings, validate_where
 from chromadb.utils.embedding_functions import (
     EmbeddingFunction,
     register_embedding_function,
 )
 import numpy as np
+
+
+@pytest.mark.parametrize("operator", ["$gt", "$gte", "$lt", "$lte"])
+@pytest.mark.parametrize("operand", [True, False])
+def test_validate_where_rejects_boolean_ordering_operand(
+    operator: str, operand: bool
+) -> None:
+    with pytest.raises(ValueError, match="Expected operand value to be an int or a float"):
+        validate_where({"value": {operator: operand}})
+
+
+@pytest.mark.parametrize("populated", [False, True])
+def test_collection_rejects_boolean_ordering_operand(populated: bool) -> None:
+    client = chromadb.EphemeralClient()
+    collection = client.create_collection(
+        "boolean-ordering-operand", embedding_function=None
+    )
+    try:
+        if populated:
+            collection.add(ids=["one"], embeddings=[[1.0, 2.0]], metadatas=[{"value": 2}])
+        with pytest.raises(
+            ValueError, match="Expected operand value to be an int or a float"
+        ):
+            collection.get(where={"value": {"$gt": True}})
+    finally:
+        client.delete_collection(collection.name)
+
+
+@pytest.mark.parametrize("operator", ["$gt", "$gte", "$lt", "$lte"])
+@pytest.mark.parametrize("operand", [1, 1.5])
+def test_validate_where_accepts_numeric_ordering_operand(
+    operator: str, operand: float
+) -> None:
+    validate_where({"value": {operator: operand}})
+    validate_where({"value": {"$eq": True}})
+    validate_where({"value": {"$ne": False}})
 
 
 def random_embeddings() -> Embeddings:

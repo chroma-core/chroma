@@ -1235,7 +1235,7 @@ def validate_where(where: Where) -> None:
             for operator, operand in value.items():
                 # Only numbers can be compared with gt, gte, lt, lte
                 if operator in ["$gt", "$gte", "$lt", "$lte"]:
-                    if not isinstance(operand, (int, float)):
+                    if isinstance(operand, bool) or not isinstance(operand, (int, float)):
                         raise ValueError(
                             f"Expected operand value to be an int or a float for operator {operator}, got {operand}"
                         )
