@@ -118,6 +118,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         return dict(self._session.headers)
 
     @override
+    def stop(self) -> None:
+        super().stop()
+        # Close the pooled keep-alive connections: without this, every
+        # HttpClient accumulates one open session that System.stop() never
+        # releases, and long-running hosts hit the open-file limit
+        # (issue #8012). httpx.Client.close() is idempotent.
+        self._session.close()
+
+    @override
     def get_api_url(self) -> str:
         return self._api_url
 
