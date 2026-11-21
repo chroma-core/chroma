@@ -299,10 +299,11 @@ impl LocalExecutor {
                 embedding
             };
             let distances = hnsw_reader
-                .query_embedding(
+                .query_embedding_with_ef(
                     allowed_offset_ids.as_slice(),
                     query_embedding,
                     plan.knn.fetch,
+                    Some(hnsw_config.ef_search),
                 )
                 .await
                 .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
