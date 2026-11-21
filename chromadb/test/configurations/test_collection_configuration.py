@@ -1,7 +1,10 @@
 import pytest
+from pathlib import Path
 from typing import Dict, Any, cast, List
 import numpy as np
 import warnings
+from chromadb import Collection, RustClient
+from chromadb.api.client import Client
 from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
@@ -281,6 +284,79 @@ def test_hnsw_configuration_updates(client: ClientAPI) -> None:
             assert hnsw_config.get("space") == "cosine"
             assert hnsw_config.get("ef_construction") == 100
             assert hnsw_config.get("max_neighbors") == 16
+
+
+def test_live_hnsw_ef_search(tmp_path: Path) -> None:
+    rng = np.random.default_rng(7963)
+    vectors = rng.standard_normal((512, 32)).astype(np.float32)
+    queries = rng.standard_normal((32, 32)).astype(np.float32)
+    ids = [str(i) for i in range(len(vectors))]
+    low, high = 1, 128
+
+    def neighbors(collection: Collection) -> List[List[str]]:
+        results = collection.query(query_embeddings=queries, n_results=1, include=[])
+        return results["ids"]
+
+    with cast(Client, RustClient(path=str(tmp_path))) as client:
+        for name, ef_search in [("subject", high), ("control", low)]:
+            collection = client.create_collection(
+                name=name,
+                configuration={
+                    "hnsw": {
+                        "ef_search": ef_search,
+                        "max_neighbors": 4,
+                        "sync_threshold": len(vectors),
+                    }
+                },
+            )
+            collection.add(ids=ids, embeddings=vectors)
+
+        subject = client.get_collection("subject")
+        expected_high = neighbors(subject)
+        subject.modify(configuration={"hnsw": {"ef_search": low}})
+
+    # Reload the same persisted graph to obtain its low-ef reference.
+    with cast(Client, RustClient(path=str(tmp_path))) as client:
+        subject = client.get_collection("subject")
+        control = client.get_collection("control")
+        expected_low = neighbors(subject)
+        assert expected_low != expected_high, "queries must distinguish search widths"
+        control_low = neighbors(control)
+
+        subject.modify(configuration={"hnsw": {"ef_search": high}})
+        assert neighbors(subject) == expected_high
+        assert neighbors(control) == control_low
+
+        subject.modify(configuration={"hnsw": {"ef_search": low}})
+        assert neighbors(subject) == expected_low
+
+
+@pytest.mark.parametrize("space", ["l2", "cosine"])
+def test_live_ef_search_after_deletions(tmp_path: Path, space: Space) -> None:
+    # Removing two of six points exercises the small-index exact search.
+    with cast(Client, RustClient(path=str(tmp_path))) as client:
+        collection = client.create_collection(
+            name="partial-index", configuration={"hnsw": {"space": space, "ef_search": 1}}
+        )
+        collection.add(
+            ids=["far", "middle", "near", "excluded", "deleted-a", "deleted-b"],
+            embeddings=[[0, 3], [3, 3], [3, 0], [2, 0.25], [2, 0], [2, -1]],
+        )
+        collection.delete(ids=["deleted-a", "deleted-b"])
+        expected = [1.0, 10.0] if space == "l2" else [0.0, 1.0 - 1.0 / np.sqrt(2)]
+        for breadth in (1, 96):
+            collection.modify(configuration={"hnsw": {"ef_search": breadth}})
+            unfiltered = collection.query(query_embeddings=[[2, 0]], n_results=2, include=[])
+            assert set(unfiltered["ids"][0]) == {"near", "excluded"}
+            result = collection.query(
+                ids=["far", "middle", "near"],
+                query_embeddings=[[2, 0]],
+                n_results=2,
+                include=["distances"],
+            )
+            assert result["ids"] == [["near", "middle"]]
+            assert result["distances"] is not None
+            assert result["distances"][0] == pytest.approx(expected, abs=1e-6)
 
 
 def test_configuration_persistence(client_factories: "ClientFactories") -> None:

@@ -274,9 +274,20 @@ impl HnswIndex {
         allowed_ids: &[usize],
         disallowed_ids: &[usize],
     ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>> {
+        self.query_with_ef(vector, k, allowed_ids, disallowed_ids, None)
+    }
+
+    pub fn query_with_ef(
+        &self,
+        vector: &[f32],
+        k: usize,
+        allowed_ids: &[usize],
+        disallowed_ids: &[usize],
+        ef_search: Option<usize>,
+    ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>> {
         self.validate_vector(vector)?;
         self.index
-            .query(vector, k, allowed_ids, disallowed_ids)
+            .query_with_ef(vector, k, allowed_ids, disallowed_ids, ef_search)
             .map_err(|e| WrappedHnswError(e).boxed())
     }
 
