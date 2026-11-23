@@ -2,16 +2,44 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "Cohere Embedding Function Schema",
     "description": "Schema for the Cohere embedding function configuration",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "type": "object",
     "properties": {
         "model_name": {
             "type": "string",
-            "description": "The name of the model to use for text embeddings"
+            "description": "The name of the model to use for document embeddings"
         },
         "api_key_env_var": {
             "type": "string",
             "description": "Environment variable name that contains your API key for the Cohere API"
+        },
+        "query_model_name": {
+            "type": "string",
+            "description": "Optional model to use for query embeddings. Must share an embedding space with model_name (e.g. embed-v5.0-pro and embed-v5.0-fast)"
+        },
+        "output_dimension": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional embedding size for models with Matryoshka output (embed-v4.0 and newer)"
+        },
+        "input_type": {
+            "type": "string",
+            "enum": ["search_document", "search_query", "classification", "clustering", "image"],
+            "description": "Input type for document embeddings (set by the JS client)"
+        },
+        "truncate": {
+            "type": "string",
+            "enum": ["NONE", "START", "END"],
+            "description": "How the API handles inputs longer than the model's context (set by the JS client)"
+        },
+        "embedding_type": {
+            "type": "string",
+            "enum": ["float", "int8", "uint8", "binary", "ubinary"],
+            "description": "Embedding type to return (set by the JS client)"
+        },
+        "image": {
+            "type": "boolean",
+            "description": "Whether inputs are images (set by the JS client)"
         }
     },
     "required": [

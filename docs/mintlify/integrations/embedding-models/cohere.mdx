@@ -11,8 +11,13 @@ This embedding function relies on the `cohere` python package, which you can ins
 
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
-cohere_ef  = embedding_functions.CohereEmbeddingFunction(api_key="YOUR_API_KEY",  model_name="large")
-cohere_ef(input=["document1","document2"])
+
+# Reads COHERE_API_KEY (or CHROMA_COHERE_API_KEY) from the environment
+cohere_ef = embedding_functions.CohereEmbeddingFunction(model_name="embed-v5.0-pro")
+
+collection = client.create_collection(name="docs", embedding_function=cohere_ef)
+collection.add(ids=["1", "2"], documents=["document1", "document2"])
+results = collection.query(query_texts=["a question"], n_results=2)
 ```
 
 </Tab>
@@ -24,18 +29,11 @@ cohere_ef(input=["document1","document2"])
 
 import { CohereEmbeddingFunction } from "@chroma-core/cohere";
 
-const embedder = new CohereEmbeddingFunction({ apiKey: "apiKey" });
+// Reads COHERE_API_KEY from the environment
+const embedder = new CohereEmbeddingFunction({ modelName: "embed-v5.0-pro" });
 
-// use directly
-const embeddings = embedder.generate(["document1", "document2"]);
-
-// pass documents to query for .add and .query
 const collection = await client.createCollection({
-    name: "name",
-    embeddingFunction: embedder,
-});
-const collectionGet = await client.getCollection({
-    name: "name",
+    name: "docs",
     embeddingFunction: embedder,
 });
 ```
@@ -44,19 +42,60 @@ const collectionGet = await client.getCollection({
 
 </Tabs>
 
-You can pass in an optional `model_name` argument, which lets you choose which Cohere embeddings model to use. By default, Chroma uses `large` model. You can see the available models under `Get embeddings` section [here](https://docs.cohere.ai/reference/embed).
+By default, Chroma uses `embed-v5.0-pro`. You can pass a different model with `model_name` (`modelName` in TypeScript). See Cohere's [Embed models](https://docs.cohere.com/docs/cohere-embed) page for the full list. Collections you already created keep the model they were created with.
 
-### Multilingual model example
+Documents are embedded with Cohere's `search_document` input type and queries with `search_query`, so retrieval works as Cohere's models expect without extra setup.
+
+### Index with Pro, query with Fast
+
+`embed-v5.0-pro` and `embed-v5.0-fast` share one embedding space. You can embed documents with Pro and run queries with the lower-latency Fast model against the same collection:
 
 <CodeGroup>
 
 ```python Python
-cohere_ef  = embedding_functions.CohereEmbeddingFunction(
-    api_key="YOUR_API_KEY",
-    model_name="multilingual-22-12"
+cohere_ef = embedding_functions.CohereEmbeddingFunction(
+    model_name="embed-v5.0-pro",
+    query_model_name="embed-v5.0-fast",
 )
+```
 
-multilingual_texts  = [
+```typescript TypeScript
+const embedder = new CohereEmbeddingFunction({
+    modelName: "embed-v5.0-pro",
+    queryModelName: "embed-v5.0-fast",
+});
+```
+
+</CodeGroup>
+
+### Smaller embeddings
+
+Embed v4.0 and newer models support Matryoshka embeddings, so you can trade a little accuracy for less storage by setting `output_dimension` (`outputDimension` in TypeScript), for example `1024`. This can't be changed after the collection is created.
+
+<CodeGroup>
+
+```python Python
+cohere_ef = embedding_functions.CohereEmbeddingFunction(
+    model_name="embed-v5.0-pro",
+    output_dimension=1024,
+)
+```
+
+```typescript TypeScript
+const embedder = new CohereEmbeddingFunction({
+    modelName: "embed-v5.0-pro",
+    outputDimension: 1024,
+});
+```
+
+</CodeGroup>
+
+### Multilingual text
+
+Embed 5 models are multilingual, so no separate model is needed:
+
+```python
+multilingual_texts = [
     'Hello from Cohere!', 'مرحبًا من كوهير!',
     'Hallo von Cohere!', 'Bonjour de Cohere!',
     '¡Hola desde Cohere!', 'Olá do Cohere!',
@@ -65,32 +104,7 @@ multilingual_texts  = [
 ]
 
 cohere_ef(input=multilingual_texts)
-
 ```
-
-```typescript TypeScript
-import { CohereEmbeddingFunction } from "chromadb";
-
-const embedder = new CohereEmbeddingFunction("apiKey");
-
-multilingual_texts = [
-    "Hello from Cohere!",
-    "مرحبًا من كوهير!",
-    "Hallo von Cohere!",
-    "Bonjour de Cohere!",
-    "¡Hola desde Cohere!",
-    "Olá do Cohere!",
-    "Ciao da Cohere!",
-    "您好，来自 Cohere！",
-    "कोहिअर से नमस्ते!",
-];
-
-const embeddings = embedder.generate(multilingual_texts);
-```
-
-</CodeGroup>
-
-For more information on multilingual model you can read [here](https://docs.cohere.ai/docs/multilingual-language-models).
 
 ### Multimodal model example
 
@@ -112,10 +126,7 @@ for i in range(N_IMAGES):
     image.save(f"images/{i}.jpg")
 
 
-multimodal_cohere_ef = CohereEmbeddingFunction(
-    model_name="embed-english-v3.0",
-    api_key="YOUR_API_KEY",
-)
+multimodal_cohere_ef = CohereEmbeddingFunction(model_name="embed-v5.0-pro")
 image_loader = ImageLoader()
 
 multimodal_collection = client.create_collection(
@@ -125,9 +136,7 @@ multimodal_collection = client.create_collection(
 
 image_uris = sorted([os.path.join(IMAGE_FOLDER, image_name) for image_name in os.listdir(IMAGE_FOLDER)])
 ids = [str(i) for i in range(len(image_uris))]
-for i in range(len(image_uris)):
-    # max images per add is 1, see cohere docs https://docs.cohere.com/v2/reference/embed#request.body.images
-    multimodal_collection.add(ids=[str(i)], uris=[image_uris[i]])
+multimodal_collection.add(ids=ids, uris=image_uris)
 
 retrieved = multimodal_collection.query(query_texts=["animals"], include=['data'], n_results=3)
 

@@ -6,7 +6,7 @@ import {
 } from "chromadb";
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import process from "node:process";
-import { CohereClient } from "cohere-ai";
+import { CohereClientV2 } from "cohere-ai";
 
 export type CohereEmbedInputType =
   | "search_document"
@@ -26,6 +26,13 @@ export type CohereEmbedEmbeddingType =
 
 const NAME = "cohere";
 
+// Models that share one embedding space. Documents embedded with one can be
+// queried with another, e.g. index with Pro and query with Fast.
+const EMBED_V5_MODELS = new Set(["embed-v5.0-pro", "embed-v5.0-fast"]);
+
+const sharesSpace = (a: string, b: string): boolean =>
+  a === b || (EMBED_V5_MODELS.has(a) && EMBED_V5_MODELS.has(b));
+
 export interface CohereConfig {
   model_name: string;
   api_key_env_var: string;
@@ -33,6 +40,8 @@ export interface CohereConfig {
   truncate?: CohereEmbedTruncate;
   embedding_type?: CohereEmbedEmbeddingType;
   image?: boolean;
+  query_model_name?: string;
+  output_dimension?: number;
 }
 
 export interface CohereArgs {
@@ -43,27 +52,35 @@ export interface CohereArgs {
   inputType?: CohereEmbedInputType;
   truncate?: CohereEmbedTruncate;
   embeddingType?: CohereEmbedEmbeddingType;
+  /** Model used for queries. Must share an embedding space with modelName. */
+  queryModelName?: string;
+  /** Embedding size for models with Matryoshka output (embed-v4.0 and newer). */
+  outputDimension?: number;
 }
 
 export class CohereEmbeddingFunction implements EmbeddingFunction {
   public readonly name = NAME;
 
-  private readonly client: CohereClient;
+  private readonly client: CohereClientV2;
   private readonly apiKeyEnvVar: string;
   private readonly modelName: string;
   private readonly inputType: CohereEmbedInputType | undefined;
   private readonly truncate: CohereEmbedTruncate | undefined;
   private readonly embeddingType: CohereEmbedEmbeddingType | undefined;
   private readonly image: boolean;
+  private readonly queryModelName: string | undefined;
+  private readonly outputDimension: number | undefined;
 
   constructor(args: Partial<CohereArgs> = {}) {
     const {
       apiKeyEnvVar = "COHERE_API_KEY",
-      modelName = "embed-english-v3.0",
+      modelName = "embed-v5.0-pro",
       inputType = "search_document",
       truncate,
       embeddingType,
       image = false,
+      queryModelName,
+      outputDimension,
     } = args;
 
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
@@ -74,46 +91,63 @@ export class CohereEmbeddingFunction implements EmbeddingFunction {
       );
     }
 
-    this.client = new CohereClient({ token: apiKey });
+    if (queryModelName && !sharesSpace(modelName, queryModelName)) {
+      throw new ChromaValueError(
+        `queryModelName must share an embedding space with modelName. Supported pairs: ${[...EMBED_V5_MODELS].join(", ")}`,
+      );
+    }
+
+    this.client = new CohereClientV2({ token: apiKey });
     this.apiKeyEnvVar = apiKeyEnvVar;
     this.modelName = modelName;
     this.inputType = inputType;
     this.truncate = truncate;
     this.embeddingType = embeddingType;
     this.image = image;
+    this.queryModelName = queryModelName;
+    this.outputDimension = outputDimension;
   }
 
   public async generate(texts: string[]): Promise<number[][]> {
-    if (this.image && texts.length > 1) {
-      throw new Error("Cohere image embedding supports one image at a time");
-    }
+    return this.embed(texts, this.modelName, this.inputType);
+  }
 
+  /**
+   * Embeds query texts. When the embedding function is configured for
+   * retrieval (the default "search_document" input type), queries are sent
+   * as "search_query", which is what Cohere's retrieval models expect.
+   */
+  public async generateForQueries(texts: string[]): Promise<number[][]> {
+    const inputType =
+      this.inputType === "search_document" ? "search_query" : this.inputType;
+    return this.embed(texts, this.queryModelName ?? this.modelName, inputType);
+  }
+
+  private async embed(
+    texts: string[],
+    model: string,
+    inputType: CohereEmbedInputType | undefined,
+  ): Promise<number[][]> {
     if (!this.image && texts.length > 96) {
       throw new Error(
-        "Cohere image embedding supports a maximum of 96 text inputs at a time",
+        "Cohere embedding supports a maximum of 96 text inputs at a time",
       );
     }
 
+    const embeddingType = this.embeddingType ?? "float";
     const response = await this.client.embed({
-      model: this.modelName,
-      inputType: this.image ? "image" : this.inputType,
+      model,
+      inputType: this.image ? "image" : (inputType ?? "search_document"),
       truncate: this.truncate,
-      embeddingTypes: this.embeddingType ? [this.embeddingType] : undefined,
+      embeddingTypes: [embeddingType],
+      outputDimension: this.outputDimension,
       images: this.image ? texts : undefined,
       texts: !this.image ? texts : undefined,
     });
 
-    const embeddings = response.embeddings;
+    const embeddings = response.embeddings[embeddingType];
     if (Array.isArray(embeddings)) {
-      return embeddings;
-    } else if (
-      this.embeddingType &&
-      embeddings[this.embeddingType] &&
-      Array.isArray(embeddings[this.embeddingType])
-    ) {
-      return embeddings[this.embeddingType] as number[][];
-    } else if (embeddings["float"] && Array.isArray(embeddings["float"])) {
-      return embeddings["float"];
+      return embeddings as number[][];
     }
     throw new Error("Failed to generate embeddings");
   }
@@ -154,6 +188,8 @@ export class CohereEmbeddingFunction implements EmbeddingFunction {
       truncate: config.truncate,
       embeddingType: config.embedding_type,
       image: config.image,
+      queryModelName: config.query_model_name,
+      outputDimension: config.output_dimension,
     });
   }
 
@@ -165,12 +201,28 @@ export class CohereEmbeddingFunction implements EmbeddingFunction {
       truncate: this.truncate,
       embedding_type: this.embeddingType,
       image: this.image,
+      query_model_name: this.queryModelName,
+      output_dimension: this.outputDimension,
     };
   }
 
   public validateConfigUpdate(newConfig: Record<string, any>): void {
     if (this.getConfig().model_name !== newConfig.model_name) {
       throw new ChromaValueError("Model name cannot be updated");
+    }
+    if (
+      newConfig.output_dimension !== undefined &&
+      newConfig.output_dimension !== this.outputDimension
+    ) {
+      throw new ChromaValueError("Output dimension cannot be updated");
+    }
+    if (
+      newConfig.query_model_name &&
+      !sharesSpace(this.modelName, newConfig.query_model_name)
+    ) {
+      throw new ChromaValueError(
+        "queryModelName must share an embedding space with modelName",
+      );
     }
   }
 
