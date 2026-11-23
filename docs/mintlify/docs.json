@@ -227,7 +227,8 @@
               "integrations/embedding-models/amazon-bedrock",
               "integrations/embedding-models/baseten",
               "integrations/embedding-models/chroma-cloud-qwen",
-              "integrations/embedding-models/superlinked"
+              "integrations/embedding-models/superlinked",
+              "integrations/embedding-models/hobbylm"
             ]
           },
           {
