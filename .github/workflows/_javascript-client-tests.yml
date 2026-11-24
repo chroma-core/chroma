@@ -16,6 +16,10 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.23.4"
       - uses: pnpm/action-setup@v3
         with:
           version: "9"
