@@ -4536,4 +4536,30 @@ mod tests {
         )
         .await;
     }
+
+    #[test]
+    fn test_openapi_healthcheck_schema() {
+        use super::ApiDoc;
+        use utoipa::OpenApi;
+        let openapi = ApiDoc::openapi();
+        let paths = &openapi.paths;
+        let healthcheck_path = paths
+            .paths
+            .get("/api/v2/healthcheck")
+            .expect("/api/v2/healthcheck path should exist in OpenAPI spec");
+        let op = healthcheck_path
+            .get
+            .as_ref()
+            .expect("GET operation should exist for /api/v2/healthcheck");
+        let resp200 = op
+            .responses
+            .responses
+            .get("200")
+            .expect("200 response should exist for /api/v2/healthcheck");
+        let json = serde_json::to_value(resp200).expect("failed to serialize 200 response");
+        assert_eq!(
+            json["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/HealthCheckResponse"
+        );
+    }
 }
