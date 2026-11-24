@@ -1,5 +1,9 @@
+import io
 import os
+import tarfile
 import tempfile
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Dict, Any
 
 import numpy as np
@@ -202,3 +206,40 @@ class TestONNXMiniLM_L6_V2:
 
         # The similarity between text1 and text2 should be higher than between text1 and text3
         assert sim_1_2 > sim_1_3
+
+
+def test_model_archive_extraction_uses_data_filter_when_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The safe "data" extraction filter must be used whenever tarfile provides
+    it, including on pre-3.12 Pythons that received the security backport
+    (3.9.17+, 3.10.12+, 3.11.4+), not only on 3.12+."""
+    if not hasattr(tarfile, "data_filter"):
+        pytest.skip("tarfile extraction filters not available")
+
+    import chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 as onnx_module
+
+    # Simulate a patched Python 3.11.4: filters exist, version is < 3.12.
+    monkeypatch.setattr(
+        onnx_module,
+        "sys",
+        SimpleNamespace(version_info=(3, 11, 4, "final", 0)),
+        raising=False,
+    )
+
+    download_path = tmp_path / "model"
+    download_path.mkdir()
+    monkeypatch.setattr(ONNXMiniLM_L6_V2, "DOWNLOAD_PATH", download_path)
+    monkeypatch.setattr(onnx_module, "_verify_sha256", lambda *_: True)
+
+    # An archive member that escapes the download directory.
+    payload = b"x"
+    info = tarfile.TarInfo("../escaped.txt")
+    info.size = len(payload)
+    with tarfile.open(download_path / ONNXMiniLM_L6_V2.ARCHIVE_FILENAME, "w:gz") as tar:
+        tar.addfile(info, io.BytesIO(payload))
+
+    ef = ONNXMiniLM_L6_V2()
+    with pytest.raises(tarfile.FilterError):
+        ef._download_model_if_not_exists()
+    assert not (tmp_path / "escaped.txt").exists()
