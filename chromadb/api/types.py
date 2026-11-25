@@ -1183,11 +1183,18 @@ def validate_metadatas(metadatas: Metadatas) -> Metadatas:
     return metadatas
 
 
-def validate_where(where: Where) -> None:
+_MAX_WHERE_RECURSION_DEPTH = 64
+
+
+def validate_where(where: Where, *, _depth: int = 0) -> None:
     """
     Validates where to ensure it is a dictionary of strings to strings, ints, floats or operator expressions,
     or in the case of $and and $or, a list of where expressions
     """
+    if _depth > _MAX_WHERE_RECURSION_DEPTH:
+        raise ValueError(
+            f"Where filter nesting depth exceeds {_MAX_WHERE_RECURSION_DEPTH}"
+        )
     if not isinstance(where, dict):
         raise ValueError(f"Expected where to be a dict, got {where}")
     if len(where) != 1:
@@ -1223,7 +1230,7 @@ def validate_where(where: Where) -> None:
                     f"Expected where value for $and or $or to be a list with at least two where expressions, got {value}"
                 )
             for where_expression in value:
-                validate_where(where_expression)
+                validate_where(where_expression, _depth=_depth + 1)
         # Value is a operator expression
         if isinstance(value, dict):
             # Ensure there is only one operator
@@ -1285,11 +1292,15 @@ def validate_where(where: Where) -> None:
                     )
 
 
-def validate_where_document(where_document: WhereDocument) -> None:
+def validate_where_document(where_document: WhereDocument, *, _depth: int = 0) -> None:
     """
     Validates where_document to ensure it is a dictionary of WhereDocumentOperator to strings, or in the case of $and and $or,
     a list of where_document expressions
     """
+    if _depth > _MAX_WHERE_RECURSION_DEPTH:
+        raise ValueError(
+            f"Where document filter nesting depth exceeds {_MAX_WHERE_RECURSION_DEPTH}"
+        )
     if not isinstance(where_document, dict):
         raise ValueError(
             f"Expected where document to be a dictionary, got {where_document}"
@@ -1320,7 +1331,7 @@ def validate_where_document(where_document: WhereDocument) -> None:
                     f"Expected document value for $and or $or to be a list with at least two where document expressions, got {operand}"
                 )
             for where_document_expression in operand:
-                validate_where_document(where_document_expression)
+                validate_where_document(where_document_expression, _depth=_depth + 1)
         # Value is $contains/$not_contains/$regex/$not_regex operator
         elif not isinstance(operand, str):
             raise ValueError(
