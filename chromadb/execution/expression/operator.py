@@ -567,7 +567,7 @@ class Limit:
             raise TypeError(f"Expected dict for Limit, got {type(data).__name__}")
 
         offset = data.get("offset", 0)
-        if not isinstance(offset, int):
+        if isinstance(offset, bool) or not isinstance(offset, int):
             raise TypeError(
                 f"Limit offset must be an integer, got {type(offset).__name__}"
             )
@@ -576,7 +576,7 @@ class Limit:
 
         limit = data.get("limit")
         if limit is not None:
-            if not isinstance(limit, int):
+            if isinstance(limit, bool) or not isinstance(limit, int):
                 raise TypeError(
                     f"Limit limit must be an integer, got {type(limit).__name__}"
                 )
@@ -682,7 +682,7 @@ class Rank:
 
         if op == "$val":
             value = data["$val"]
-            if not isinstance(value, (int, float)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise TypeError(f"$val requires a number, got {type(value).__name__}")
             return Val(value)
 
@@ -727,7 +727,7 @@ class Rank:
                 raise TypeError(f"$knn key must be a string, got {type(key).__name__}")
 
             limit = knn_data.get("limit", 16)
-            if not isinstance(limit, int):
+            if isinstance(limit, bool) or not isinstance(limit, int):
                 raise TypeError(
                     f"$knn limit must be an integer, got {type(limit).__name__}"
                 )
@@ -1367,7 +1367,7 @@ def _parse_k_aggregate(
         raise ValueError(f"{op} keys cannot be empty")
 
     k = agg_data["k"]
-    if not isinstance(k, int):
+    if isinstance(k, bool) or not isinstance(k, int):
         raise TypeError(f"{op} k must be an integer, got {type(k).__name__}")
     if k <= 0:
         raise ValueError(f"{op} k must be positive, got {k}")
