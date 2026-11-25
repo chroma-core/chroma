@@ -38,7 +38,7 @@ const TRANSITION_CHARS: usize = 2;
 // RemoveShortFilter
 // ---------------------------------------------------------------------------
 
-/// Drops tokens shorter than `min_length` bytes.
+/// Drops tokens shorter than `min_length` characters.
 ///
 /// Used to filter out very short tokens (e.g. "a", "of") that are too small
 /// for trigram extraction and would create excessive hash collisions.
@@ -89,7 +89,7 @@ struct RemoveShortFilterStream<T> {
 impl<T: TokenStream> TokenStream for RemoveShortFilterStream<T> {
     fn advance(&mut self) -> bool {
         while self.inner.advance() {
-            if self.inner.token().text.len() >= self.min_length {
+            if self.inner.token().text.chars().count() >= self.min_length {
                 return true;
             }
         }
@@ -504,6 +504,74 @@ mod tests {
         assert!(a.plan_query("").is_err());
         assert!(a.plan_query("ab").is_err());
         assert!(a.plan_query("   ").is_err());
+    }
+
+    #[test]
+    fn test_document_filters_short_multibyte_chars() {
+        let mut a = WordAnalyzer::default();
+        // 1-2 char non-ASCII tokens with >=3 UTF-8 bytes must be filtered out
+        // because NgramTokenizer(3, 3) cannot extract trigrams from <3 chars.
+        let dt = a
+            .tokenize_document("中 東京 да éé café 東京都 мир")
+            .unwrap();
+        assert_eq!(dt.buckets.len(), 3);
+        assert!(dt.buckets.contains(&a.hash_token("café").unwrap()));
+        assert!(dt.buckets.contains(&a.hash_token("東京都").unwrap()));
+        assert!(dt.buckets.contains(&a.hash_token("мир").unwrap()));
+        assert!(!dt.buckets.contains(&a.hash_token("中").unwrap()));
+        assert!(!dt.buckets.contains(&a.hash_token("東京").unwrap()));
+        assert!(!dt.buckets.contains(&a.hash_token("да").unwrap()));
+        assert!(!dt.buckets.contains(&a.hash_token("éé").unwrap()));
+        for &bucket in &dt.buckets {
+            assert!(
+                dt.trigrams.iter().any(|(_, _, b)| *b == bucket),
+                "every indexed bucket must have at least one trigram"
+            );
+        }
+    }
+
+    #[test]
+    fn test_query_short_multibyte_chars() {
+        let mut a = WordAnalyzer::default();
+        // Queries containing only 1-2 char non-ASCII tokens have no selective token.
+        assert!(matches!(
+            a.plan_query("中"),
+            Err(TokenizerError::NoSelectiveToken { .. })
+        ));
+        assert!(matches!(
+            a.plan_query("東京"),
+            Err(TokenizerError::NoSelectiveToken { .. })
+        ));
+        assert!(matches!(
+            a.plan_query("да"),
+            Err(TokenizerError::NoSelectiveToken { .. })
+        ));
+        assert!(matches!(
+            a.plan_query("éé"),
+            Err(TokenizerError::NoSelectiveToken { .. })
+        ));
+
+        // Mixed query: short non-ASCII token is dropped rather than producing
+        // an empty TokenLookup::Trigram(vec![]) that causes false negatives.
+        let plan = a.plan_query("hello 東京").unwrap();
+        assert_eq!(plan.lookups.len(), 1);
+        assert_eq!(
+            plan.lookups[0],
+            TokenLookup::Trigram(vec![
+                "hel".to_string(),
+                "ell".to_string(),
+                "llo".to_string()
+            ])
+        );
+        assert!(plan.transitions.is_empty());
+
+        // 3-char non-ASCII token is preserved with its single character trigram.
+        let plan_3char = a.plan_query("東京都").unwrap();
+        assert!(plan_3char.singleton);
+        assert_eq!(
+            plan_3char.lookups,
+            vec![TokenLookup::Trigram(vec!["東京都".to_string()])]
+        );
     }
 
     // --- hash_bits ---
