@@ -190,13 +190,14 @@ impl FullTextBitmapWriter {
             let Some((_, delta)) = self.token_deltas.remove(&bucket_id) else {
                 continue;
             };
-            let mut bitmap = match &self.old_reader {
-                Some(r) => r.get_doc_bitmap(0, bucket_id).await?,
-                None => RoaringBitmap::new(),
+            let (mut bitmap, old_chunks) = match &self.old_reader {
+                Some(r) => r.get_doc_bitmap_with_chunks(0, bucket_id).await?,
+                None => (RoaringBitmap::new(), 0),
             };
             bitmap |= &delta.adds;
             bitmap -= &delta.deletes;
-            self.write_doc_bitmap(0, bucket_id, &bitmap).await?;
+            self.write_doc_bitmap(0, bucket_id, &bitmap, old_chunks)
+                .await?;
         }
         Ok(())
     }
@@ -266,13 +267,16 @@ impl FullTextBitmapWriter {
             if entry.doc_adds.is_empty() && entry.doc_deletes.is_empty() {
                 continue;
             }
-            let mut bitmap = match &self.old_reader {
-                Some(r) => r.get_doc_bitmap(TRANSITION_DOC_FLAG, hash).await?,
-                None => RoaringBitmap::new(),
+            let (mut bitmap, old_chunks) = match &self.old_reader {
+                Some(r) => {
+                    r.get_doc_bitmap_with_chunks(TRANSITION_DOC_FLAG, hash)
+                        .await?
+                }
+                None => (RoaringBitmap::new(), 0),
             };
             bitmap |= &entry.doc_adds;
             bitmap -= &entry.doc_deletes;
-            self.write_doc_bitmap(TRANSITION_DOC_FLAG, hash, &bitmap)
+            self.write_doc_bitmap(TRANSITION_DOC_FLAG, hash, &bitmap, old_chunks)
                 .await?;
         }
         Ok(())
@@ -315,18 +319,44 @@ impl FullTextBitmapWriter {
 
     /// Write a doc-ID bitmap, splitting it into 16M-range chunks.
     /// Key encoding: `flag | (id << CHUNK_SHIFT) | chunk_index`.
+    ///
+    /// Any chunk present in `old_chunks` that becomes empty is explicitly
+    /// deleted in ascending key order so forked blockfiles do not retain
+    /// stale pre-fork chunk bitmaps.
     async fn write_doc_bitmap(
         &self,
         flag: u32,
         id: u32,
         bitmap: &RoaringBitmap,
+        old_chunks: u64,
     ) -> Result<(), FullTextBitmapError> {
+        let mut pending_deletes = old_chunks;
         let docs: Vec<u32> = bitmap.iter().collect();
         for chunk_docs in docs.chunk_by(|a, b| a >> CHUNK_BITS == b >> CHUNK_BITS) {
             let chunk = chunk_docs[0] >> CHUNK_BITS;
+            while pending_deletes != 0 {
+                let del_chunk = pending_deletes.trailing_zeros();
+                if del_chunk >= chunk {
+                    break;
+                }
+                pending_deletes &= !(1u64 << del_chunk);
+                self.bitmap_writer
+                    .delete::<u32, RoaringBitmap>("", flag | (id << CHUNK_SHIFT) | del_chunk)
+                    .await?;
+            }
+            if let Some(bit) = 1u64.checked_shl(chunk) {
+                pending_deletes &= !bit;
+            }
             let chunk_bm: RoaringBitmap = chunk_docs.iter().copied().collect();
             self.bitmap_writer
                 .set("", flag | (id << CHUNK_SHIFT) | chunk, chunk_bm)
+                .await?;
+        }
+        while pending_deletes != 0 {
+            let del_chunk = pending_deletes.trailing_zeros();
+            pending_deletes &= !(1u64 << del_chunk);
+            self.bitmap_writer
+                .delete::<u32, RoaringBitmap>("", flag | (id << CHUNK_SHIFT) | del_chunk)
                 .await?;
         }
         Ok(())
@@ -488,14 +518,26 @@ impl FullTextBitmapReader {
         flag: u32,
         id: u32,
     ) -> Result<RoaringBitmap, FullTextBitmapError> {
+        Ok(self.get_doc_bitmap_with_chunks(flag, id).await?.0)
+    }
+
+    /// Load a doc-ID bitmap along with a bitmask of chunk indices (`0..=MAX_CHUNK`)
+    /// present in the underlying blockfile.
+    async fn get_doc_bitmap_with_chunks(
+        &self,
+        flag: u32,
+        id: u32,
+    ) -> Result<(RoaringBitmap, u64), FullTextBitmapError> {
         let lo = flag | (id << CHUNK_SHIFT);
         let hi = lo | MAX_CHUNK;
         let entries = self.bitmap_reader.get_range(""..="", lo..=hi).await?;
         let mut result = RoaringBitmap::new();
-        for (_, _, chunk_bm) in entries {
+        let mut chunks = 0u64;
+        for (_, key, chunk_bm) in entries {
+            chunks |= 1u64 << (key & MAX_CHUNK);
             result |= chunk_bm;
         }
-        Ok(result)
+        Ok((result, chunks))
     }
 
     /// Load a bounded-universe ID bitmap via point read.
@@ -915,5 +957,109 @@ mod tests {
         assert!(result.contains(0));
         assert!(result.contains(chunk_size));
         assert!(result.contains(chunk_size * 2));
+    }
+
+    #[tokio::test]
+    async fn test_fork_delete_empties_bucket_and_transition() {
+        let (_tmp, provider) = provider();
+        let hw_tokens = tokenize("hello world");
+        let hr_buckets = tokenize("hello rust").buckets;
+        let world_bucket = *hw_tokens
+            .buckets
+            .iter()
+            .find(|b| !hr_buckets.contains(b))
+            .unwrap();
+        let hw_transition_hash = hw_tokens.transitions[0].0;
+
+        // Gen 1: doc 1 is the only document containing "world" and the "hello world" transition.
+        let w1 = new_writer(&provider).await;
+        w1.add_document(1, tokenize("hello world"));
+        w1.add_document(2, tokenize("hello rust"));
+        let reader1 = flush_and_read(w1, &provider).await;
+
+        // Gen 2: fork and delete doc 1, emptying both the "world" bucket and transition bitmap.
+        let w2 = {
+            let bf = provider
+                .write::<u32, RoaringBitmap>(
+                    BlockfileWriterOptions::new(String::new())
+                        .fork(reader1.id())
+                        .ordered_mutations(),
+                )
+                .await
+                .unwrap();
+            FullTextBitmapWriter::new(bf, Some(reader1))
+        };
+        w2.delete_document(1, tokenize("hello world"));
+        let reader2 = flush_and_read(w2, &provider).await;
+
+        assert!(reader2
+            .get_doc_bitmap(0, world_bucket)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(reader2
+            .get_doc_bitmap(TRANSITION_DOC_FLAG, hw_transition_hash)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(reader2.search(&query("world")).await.unwrap().is_empty());
+        assert!(reader2
+            .search(&query("hello world"))
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(reader2
+            .search(&query("hello rust"))
+            .await
+            .unwrap()
+            .contains(2));
+    }
+
+    #[tokio::test]
+    async fn test_fork_delete_empties_chunks_across_chunk_boundaries() {
+        let (_tmp, provider) = provider();
+        let chunk_size = 1u32 << CHUNK_BITS; // 16M
+        let hw_tokens = tokenize("hello world");
+        let hw_transition_hash = hw_tokens.transitions[0].0;
+
+        // Gen 1: populate chunks 0, 1, and 2.
+        let w1 = new_writer(&provider).await;
+        w1.add_document(0, tokenize("hello world"));
+        w1.add_document(chunk_size, tokenize("hello world"));
+        w1.add_document(chunk_size * 2, tokenize("hello world"));
+        let reader1 = flush_and_read(w1, &provider).await;
+
+        // Gen 2: fork, empty chunks 0 and 2 while keeping chunk 1 and adding chunk 3.
+        // Exercises interleaved delete(0), set(1), delete(2), set(3) under ordered_mutations().
+        let w2 = {
+            let bf = provider
+                .write::<u32, RoaringBitmap>(
+                    BlockfileWriterOptions::new(String::new())
+                        .fork(reader1.id())
+                        .ordered_mutations(),
+                )
+                .await
+                .unwrap();
+            FullTextBitmapWriter::new(bf, Some(reader1))
+        };
+        w2.delete_document(0, tokenize("hello world"));
+        w2.delete_document(chunk_size * 2, tokenize("hello world"));
+        w2.add_document(chunk_size * 3, tokenize("hello world"));
+        let reader2 = flush_and_read(w2, &provider).await;
+
+        let search_res = reader2.search(&query("hello world")).await.unwrap();
+        assert!(!search_res.contains(0));
+        assert!(search_res.contains(chunk_size));
+        assert!(!search_res.contains(chunk_size * 2));
+        assert!(search_res.contains(chunk_size * 3));
+
+        let trans_bm = reader2
+            .get_doc_bitmap(TRANSITION_DOC_FLAG, hw_transition_hash)
+            .await
+            .unwrap();
+        assert!(!trans_bm.contains(0));
+        assert!(trans_bm.contains(chunk_size));
+        assert!(!trans_bm.contains(chunk_size * 2));
+        assert!(trans_bm.contains(chunk_size * 3));
     }
 }
