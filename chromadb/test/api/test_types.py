@@ -103,3 +103,14 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+def test_normalize_metadata_malformed_sparse_vector_raises_value_error() -> None:
+    """Malformed sparse-vector dicts surface a typed ValueError via normalize_metadata."""
+    from chromadb.api.types import normalize_metadata
+    from chromadb.base_types import TYPE_KEY, SPARSE_VECTOR_TYPE_VALUE
+
+    with pytest.raises(ValueError, match="indices"):
+        normalize_metadata(
+            {"sparse": {TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE, "values": [1.0]}}
+        )
