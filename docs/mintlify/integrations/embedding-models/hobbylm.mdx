@@ -1,0 +1,58 @@
+---
+title: HobbyLM-Embed
+---
+
+[HobbyLM-Embed-140M](https://huggingface.co/harims95/hobbylm-embed-140m) is an English text-embedding model with a sparse mixture-of-experts encoder: 140M total parameters, 36M active per token (excluding embeddings), 512-dimensional vectors, Apache-2.0. It runs locally through Chroma's `SentenceTransformerEmbeddingFunction`.
+
+<Tabs>
+
+<Tab title="Python" icon="python">
+
+This embedding function relies on the `sentence_transformers` python package:
+
+```bash
+pip install chromadb sentence-transformers
+```
+
+The model needs `trust_remote_code=True`, because its encoder is custom code in the model repository; `revision` pins a tested version of that code. For retrieval, the model expects the prefix `query: ` on queries and `passage: ` on documents. `SentenceTransformerEmbeddingFunction` uses the same function for both, so add the prefixes to the texts:
+
+```python
+import chromadb
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+
+ef = SentenceTransformerEmbeddingFunction(
+    model_name="harims95/hobbylm-embed-140m",
+    revision="ea708cee107818fa0c1871eebd26d82a1e3fb1aa",
+    trust_remote_code=True,
+)
+
+queries = ["how do vaccines work?", "what is the capital of france"]
+passages = ["Vaccines train the immune system to recognise a pathogen without causing the disease.",
+            "Paris is the capital and largest city of France."]
+
+# this function has no query/document setting: add the prefixes to the texts yourself
+q = ef(["query: " + t for t in queries])
+p = ef(["passage: " + t for t in passages])
+print("dims", len(q[0]), "norms", [round(float((v * v).sum()) ** 0.5, 4) for v in q + p])
+
+collection = chromadb.Client().create_collection(
+    name="hobbylm_demo", embedding_function=ef, metadata={"hnsw:space": "cosine"})
+collection.add(ids=["vaccines", "paris"], documents=["passage: " + t for t in passages])
+results = collection.query(query_texts=["query: " + t for t in queries], n_results=1)
+print(results["ids"], [[round(d, 4) for d in row] for row in results["distances"]])
+```
+
+Output:
+
+```
+dims 512 norms [1.0, 1.0, 1.0, 1.0]
+[['vaccines'], ['paris']] [[0.3463], [0.2698]]
+```
+
+The distances are cosine distances (1 minus cosine similarity). For similarity, clustering or classification, embed plain text without a prefix.
+
+To read documents longer than the default 512 tokens, pass `tokenizer_kwargs={"model_max_length": 2048}` to `SentenceTransformerEmbeddingFunction`; inputs longer than 2,048 tokens are truncated. Chroma reuses one loaded model per `model_name` within a Python process, so create the 2,048-token function in a new process rather than after a 512-token one.
+
+</Tab>
+
+</Tabs>
