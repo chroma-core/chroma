@@ -5,6 +5,9 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # onnxruntime-node's postinstall downloads optional CUDA EP binaries, and
+  # the 1.21.0 artifact now 404s. Tests only use the bundled CPU runtime.
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
 jobs:
   test:
