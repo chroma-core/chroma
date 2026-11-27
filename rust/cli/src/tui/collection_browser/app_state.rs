@@ -65,13 +65,8 @@ impl AppState {
         }
 
         let threshold = self.records.len() * 3 / 4;
-        if self.records_table_state.selected().unwrap_or(0) >= threshold
+        self.records_table_state.selected().unwrap_or(0) >= threshold
             && self.records.len() <= self.collection_size as usize
-        {
-            return true;
-        }
-
-        false
     }
 
     fn handle_scroll(&mut self, direction: ScrollDirection) {
