@@ -3,7 +3,6 @@ import importlib
 import logging
 import os
 import tarfile
-import sys
 from functools import cached_property
 from pathlib import Path
 from typing import List, Dict, Any, Optional, cast
@@ -313,12 +312,16 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
                 mode="r:gz",
             ) as tar:
-                if sys.version_info >= (3, 12):
+                # Extraction filters were added in Python 3.12 and backported
+                # as a security fix to 3.9.17+, 3.10.12+ and 3.11.4+, so check
+                # for the feature rather than the version.
+                # https://docs.python.org/3/library/tarfile.html#tarfile-extraction-filter
+                if hasattr(tarfile, "data_filter"):
                     tar.extractall(path=self.DOWNLOAD_PATH, filter="data")
                 else:
-                    # filter argument was added in Python 3.12
-                    # https://docs.python.org/3/library/tarfile.html#tarfile.TarFile.extractall
-                    # In versions prior to 3.12, this provides the same behavior as filter="data"
+                    # Unfiltered extraction trusts the archive fully. This is
+                    # acceptable only because the archive's SHA256 was verified
+                    # above.
                     tar.extractall(path=self.DOWNLOAD_PATH)
 
     @staticmethod
