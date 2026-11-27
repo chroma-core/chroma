@@ -9,6 +9,14 @@ This page is a list of common gotchas or issues and how to fix them.
 
 If you don't see your problem listed here, please also search the [Github Issues](https://github.com/chroma-core/chroma/issues).
 
+## Embedding dimension mismatch
+
+Depending on the client path, an error may look like `InvalidDimensionException: Embedding dimension 384 does not match collection dimensionality 768` (the Python API) or `InvalidArgumentError: Collection expecting embedding with dimension of 768, got 384` (the Rust-backed default `PersistentClient`). Both mean an incoming vector has a different length from the vectors already stored in the collection. Chroma records a collection's dimensionality when its first embedding is stored; later document and query embeddings must have that same number of values.
+
+Use the same embedding function, model, and configuration for stored documents and queries. Matching dimensions alone do not make vectors from different models comparable: each model maps text into its own vector space.
+
+Chroma does not automatically re-embed existing records when you change embedding models. Re-embed every source document with the new model into a new collection, then use that model for queries. Avoid padding or truncating vectors, or mixing models, just to get past the error. See [using embedding functions](/docs/embeddings/embedding-functions) for how to configure a collection's embedding function.
+
 ## Chroma JS-Client failures on NextJS projects
 
 Our default embedding function uses @huggingface/transformers, which depends on binaries that NextJS fails to bundle. If you are running into this issue, you can wrap your `nextConfig` (in `next.config.ts`) with the `withChroma` plugin, which will add the required settings to overcome the bundling issues.
