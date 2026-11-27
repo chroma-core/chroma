@@ -50,6 +50,8 @@ pub(crate) mod foundations;
 pub(crate) mod init;
 pub(crate) mod init_schema;
 pub(crate) mod links;
+// Unmounted while the Foundation MCP is disabled; see server.rs.
+#[allow(dead_code)]
 pub(crate) mod mcp;
 pub(crate) mod read_page;
 pub(crate) mod search;
