@@ -5,7 +5,7 @@ use crate::{
     s3::S3Storage,
     GetOptions,
 };
-use crate::{DeleteOptions, ETag, PutOptions, StorageConfigError};
+use crate::{DeleteOptions, ETag, GetIfModifiedResult, PutOptions, StorageConfigError};
 use async_trait::async_trait;
 use bytes::Bytes;
 use chroma_config::registry::Registry;
@@ -77,6 +77,20 @@ impl ACStorageProvider {
                 let (bytes, etag) = object_storage.get(key, Default::default()).await?;
                 Ok((Vec::from(bytes).into(), Some(etag)))
             }
+        }
+    }
+
+    async fn get_if_modified(
+        &self,
+        key: &str,
+        e_tag: &ETag,
+    ) -> Result<GetIfModifiedResult, StorageError> {
+        match self {
+            ACStorageProvider::S3(storage) => storage.get_if_modified(key, e_tag).await,
+            ACStorageProvider::Object(storage) => storage
+                .get_if_modified(key, e_tag)
+                .await
+                .map(|result| result.map(|(bytes, e_tag)| (Vec::from(bytes).into(), Some(e_tag)))),
         }
     }
 
@@ -880,6 +894,30 @@ impl AdmissionControlledS3Storage {
             .get_with_e_tag_internal(vec![key], options, batch_fetch_fn)
             .await?;
         Ok((result, e_tags.into_iter().next().unwrap()))
+    }
+
+    pub async fn get_if_modified(
+        &self,
+        key: &str,
+        e_tag: &ETag,
+        options: GetOptions,
+    ) -> Result<GetIfModifiedResult, StorageError> {
+        self.metrics.nac_outstanding_read_requests.record(
+            self.metrics
+                .outstanding_read_requests
+                .load(Ordering::Relaxed) as u64,
+            &self.metrics.hostname_attribute,
+        );
+        self.metrics
+            .outstanding_read_requests
+            .fetch_add(1, Ordering::Relaxed);
+        let priority = Arc::new(PriorityHolder::new(options.priority));
+        let _permit = self.rate_limiter.enter(priority, None).await;
+        let result = self.storage.get_if_modified(key, e_tag).await;
+        self.metrics
+            .outstanding_read_requests
+            .fetch_sub(1, Ordering::Relaxed);
+        result
     }
 
     pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {

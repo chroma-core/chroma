@@ -727,6 +727,18 @@ pub struct ManifestAndWitness {
     pub witness: ManifestWitness,
 }
 
+/// Result of refreshing a cached manifest witness.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ManifestRefresh {
+    /// The cached witness still identifies the current manifest.
+    Unchanged,
+    /// The manifest changed; the new manifest and witness are included so the
+    /// caller does not have to issue a second load request.
+    Changed(Box<ManifestAndWitness>),
+    /// The manifest does not exist.
+    Missing,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ManifestBounds {
     pub oldest_timestamp: LogPosition,
