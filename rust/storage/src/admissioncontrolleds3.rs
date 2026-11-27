@@ -1450,12 +1450,16 @@ impl CountBasedPolicy {
             let current_priority = priority.get_priority();
 
             // Try acquiring permits at current and lower priorities
-            for pri in current_priority.as_usize()
-                ..=StorageRequestPriority::lowest()
-                    .as_usize()
-                    .min(self.remaining_tokens.len() - 1)
+            let lowest = StorageRequestPriority::lowest()
+                .as_usize()
+                .min(self.remaining_tokens.len() - 1);
+            for semaphore in self
+                .remaining_tokens
+                .iter()
+                .take(lowest + 1)
+                .skip(current_priority.as_usize())
             {
-                match self.remaining_tokens[pri].try_acquire() {
+                match semaphore.try_acquire() {
                     Ok(token) => {
                         return token;
                     }
