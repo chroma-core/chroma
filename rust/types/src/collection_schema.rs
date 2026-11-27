@@ -2090,11 +2090,7 @@ impl Schema {
         }
 
         // Check CMEK is None (default)
-        if self.cmek.is_some() {
-            return false;
-        }
-
-        true
+        self.cmek.is_none()
     }
 
     /// Check if ValueTypes (defaults) are in default state
@@ -3197,10 +3193,7 @@ impl SpannIndexConfig {
                 return false;
             }
         }
-        if !matches!(self.quantize, Quantization::None) {
-            return false;
-        }
-        true
+        matches!(self.quantize, Quantization::None)
     }
 }
 

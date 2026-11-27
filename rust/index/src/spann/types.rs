@@ -807,10 +807,7 @@ impl SpannIndexWriter {
             .versions_map
             .get(&doc_offset_id)
             .ok_or(SpannIndexWriterError::VersionNotFound)?;
-        if Self::is_deleted(*current_version) || version < *current_version {
-            return Ok(true);
-        }
-        Ok(false)
+        Ok(Self::is_deleted(*current_version) || version < *current_version)
     }
 
     async fn try_delete_posting_list(&self, head_id: u32) -> Result<(), SpannIndexWriterError> {
@@ -1703,10 +1700,7 @@ impl SpannIndexWriter {
         let hnsw_emb = hnsw_read_guard.hnsw_index.get(head_id);
         // TODO(Sanket): Check for exact error.
         // TODO(Sanket): We should get this information from hnswlib and not rely on error.
-        if hnsw_emb.is_err() || hnsw_emb.unwrap().is_none() {
-            return Ok(true);
-        }
-        Ok(false)
+        Ok(!matches!(hnsw_emb, Ok(Some(_))))
     }
 
     async fn remove_outdated_entries(
