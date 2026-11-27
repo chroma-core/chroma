@@ -164,7 +164,8 @@ impl FoundationApiServer {
         let app = Router::new()
             .merge(system_router::<FoundationApiServer>())
             .merge(routes::router())
-            .merge(routes::mcp::router(self.clone()))
+            // The Foundation MCP router is unmounted while the Foundation MCP
+            // is disabled (Nov 26 security incident); see routes::mcp.
             .with_state(self)
             .layer(DefaultBodyLimit::max(max_payload_size_bytes))
             .layer(axum::middleware::from_fn(
