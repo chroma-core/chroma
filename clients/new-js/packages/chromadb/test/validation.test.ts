@@ -1,5 +1,10 @@
 import { describe, expect, test } from "@jest/globals";
-import { validateMetadata } from "../src/utils";
+import { ChromaValueError } from "../src/errors";
+import {
+  validateBaseRecordSet,
+  validateIDs,
+  validateMetadata,
+} from "../src/utils";
 
 describe("validateMetadata", () => {
   test("accepts scalar values", () => {
@@ -86,5 +91,58 @@ describe("validateMetadata", () => {
         scores: [1, 2, 3],
       }),
     ).not.toThrow();
+  });
+});
+
+describe("validateBaseRecordSet documents", () => {
+  test("accepts string documents, including the empty string", () => {
+    expect(() =>
+      validateBaseRecordSet({ recordSet: { documents: ["a", ""] } }),
+    ).not.toThrow();
+  });
+
+  test("rejects number documents", () => {
+    const run = () =>
+      validateBaseRecordSet({ recordSet: { documents: [123 as any] } });
+    expect(run).toThrow(ChromaValueError);
+    expect(run).toThrow("Expected each document to be a string");
+  });
+
+  test("rejects object documents", () => {
+    expect(() =>
+      validateBaseRecordSet({ recordSet: { documents: [{} as any] } }),
+    ).toThrow(ChromaValueError);
+  });
+
+  test("rejects a non-string document mixed with strings", () => {
+    expect(() =>
+      validateBaseRecordSet({ recordSet: { documents: ["a", 1 as any] } }),
+    ).toThrow(ChromaValueError);
+  });
+
+  test("still rejects null documents", () => {
+    expect(() =>
+      validateBaseRecordSet({ recordSet: { documents: [null as any] } }),
+    ).toThrow(ChromaValueError);
+  });
+});
+
+describe("validateIDs", () => {
+  test("accepts unique ids", () => {
+    expect(() => validateIDs(["a", "b", ""])).not.toThrow();
+  });
+
+  test("rejects duplicate ids", () => {
+    expect(() => validateIDs(["a", "a"])).toThrow(ChromaValueError);
+    expect(() => validateIDs(["a", "a"])).toThrow(
+      "Expected IDs to be unique, but found duplicates of a",
+    );
+  });
+
+  test("rejects duplicate empty-string ids", () => {
+    expect(() => validateIDs(["", ""])).toThrow(ChromaValueError);
+    expect(() => validateIDs(["a", "", "b", ""])).toThrow(
+      "Expected IDs to be unique",
+    );
   });
 });
