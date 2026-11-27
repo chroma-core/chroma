@@ -5,6 +5,7 @@
 //! - [`QuantizedQuery`]: Pre-computed query quantization for the bitwise distance path.
 
 use std::mem::size_of;
+use std::sync::OnceLock;
 
 use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
@@ -202,10 +203,38 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// `[j*pb .. (j+1)*pb]`) rather than `Vec<Vec<u8>>`, so all four plane
     /// slices are contiguous and extracted with cheap slice indexing before
     /// the loop.
+    #[inline]
     pub fn distance_quantized_query(
         &self,
         distance_fn: &DistanceFunction,
         qq: &QuantizedQuery,
+    ) -> f32 {
+        // SAFETY: the cached function is selected after checking CPU support.
+        unsafe { (query_scorers().single)(self.0.as_ref(), distance_fn, qq) }
+    }
+
+    /// Scores all stored vector codes against one quantized query. The input
+    /// contains consecutive codes, including their headers, and the output has
+    /// one slot per code. CPU instructions for counting set bits are selected
+    /// once per process; other processors use the portable calculation.
+    pub fn distances_quantized_query(
+        codes: &[u8],
+        distance_fn: &DistanceFunction,
+        qq: &QuantizedQuery,
+        distances: &mut [f32],
+    ) {
+        let code_size = size_of::<CodeHeader1Bit>() + qq.padded_bytes;
+        assert_eq!(codes.len(), code_size * distances.len());
+        // SAFETY: the cached function is selected after checking CPU support.
+        unsafe { (query_scorers().batch)(codes, distance_fn, qq, distances) };
+    }
+
+    pub fn distance_quantized_query2(
+        &self,
+        distance_fn: &DistanceFunction,
+        qq: &QuantizedQuery,
+        c_norm: f32,
+        c_dot_q: f32,
     ) -> f32 {
         let packed = self.packed();
 
@@ -246,12 +275,142 @@ impl<T: AsRef<[u8]>> Code<1, T> {
             h.correction,
             h.norm,
             h.radial,
-            qq.c_norm,
-            qq.c_dot_q,
+            c_norm,
+            c_dot_q,
             qq.q_norm,
             distance_fn,
         )
     }
+}
+
+// Single-vector and batch entry points share a process-wide CPU selection.
+// These pointers remain private so safe callers cannot install an unsupported kernel.
+struct QueryScorers {
+    single: unsafe fn(&[u8], &DistanceFunction, &QuantizedQuery) -> f32,
+    batch: unsafe fn(&[u8], &DistanceFunction, &QuantizedQuery, &mut [f32]),
+}
+
+fn query_scorers() -> &'static QueryScorers {
+    static SCORERS: OnceLock<QueryScorers> = OnceLock::new();
+    SCORERS.get_or_init(|| {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx512f")
+            && std::is_x86_feature_detected!("avx512vpopcntdq")
+        {
+            return QueryScorers {
+                single: score_code_avx512,
+                batch: score_codes_avx512,
+            };
+        }
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("popcnt") {
+            return QueryScorers {
+                single: score_code_popcnt,
+                batch: score_codes_popcnt,
+            };
+        }
+        QueryScorers {
+            single: score_code,
+            batch: score_codes,
+        }
+    })
+}
+
+// Inline the shared calculation into each CPU-specific scoring loop.
+#[inline(always)]
+fn score_code(code: &[u8], distance_fn: &DistanceFunction, qq: &QuantizedQuery) -> f32 {
+    let code = Code::<1, _>::new(code);
+    let packed = code.packed();
+
+    // Compute ⟨packed, q_u⟩ (the binary versions of g and r_q) via bit planes.
+    // ⟨packed, q_u⟩ = Σ_j 2^j · popcount(packed AND q_u^(j))
+    let pb = qq.padded_bytes;
+    let packed_dot_qu: u32 = {
+        let p0 = &qq.bit_planes[0..pb];
+        let p1 = &qq.bit_planes[pb..2 * pb];
+        let p2 = &qq.bit_planes[2 * pb..3 * pb];
+        let p3 = &qq.bit_planes[3 * pb..4 * pb];
+        let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
+        for (x_chunk, (((q0, q1), q2), q3)) in packed.as_chunks::<8>().0.iter().zip(
+            p0.as_chunks::<8>()
+                .0
+                .iter()
+                .zip(p1.as_chunks::<8>().0.iter())
+                .zip(p2.as_chunks::<8>().0.iter())
+                .zip(p3.as_chunks::<8>().0.iter()),
+        ) {
+            let x = u64::from_le_bytes(*x_chunk);
+            pop0 += (x & u64::from_le_bytes(*q0)).count_ones();
+            pop1 += (x & u64::from_le_bytes(*q1)).count_ones();
+            pop2 += (x & u64::from_le_bytes(*q2)).count_ones();
+            pop3 += (x & u64::from_le_bytes(*q3)).count_ones();
+        }
+        pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
+    };
+
+    let h = code.header();
+    let signed_sum = h.signed_sum as f32;
+    let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
+    // ⟨g, r_q⟩ = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
+    let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
+
+    rabitq_distance_query(
+        g_dot_r_q,
+        h.correction,
+        h.norm,
+        h.radial,
+        qq.c_norm,
+        qq.c_dot_q,
+        qq.q_norm,
+        distance_fn,
+    )
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "popcnt")]
+unsafe fn score_code_popcnt(code: &[u8], metric: &DistanceFunction, query: &QuantizedQuery) -> f32 {
+    score_code(code, metric, query)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f,avx512vpopcntdq")]
+unsafe fn score_code_avx512(code: &[u8], metric: &DistanceFunction, query: &QuantizedQuery) -> f32 {
+    score_code(code, metric, query)
+}
+
+#[inline(always)]
+fn score_codes(
+    codes: &[u8],
+    distance_fn: &DistanceFunction,
+    qq: &QuantizedQuery,
+    distances: &mut [f32],
+) {
+    let code_size = size_of::<CodeHeader1Bit>() + qq.padded_bytes;
+    for (code, distance) in codes.chunks_exact(code_size).zip(distances) {
+        *distance = score_code(code, distance_fn, qq);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "popcnt")]
+unsafe fn score_codes_popcnt(
+    codes: &[u8],
+    distance_fn: &DistanceFunction,
+    qq: &QuantizedQuery,
+    distances: &mut [f32],
+) {
+    score_codes(codes, distance_fn, qq, distances);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f,avx512vpopcntdq")]
+unsafe fn score_codes_avx512(
+    codes: &[u8],
+    distance_fn: &DistanceFunction,
+    qq: &QuantizedQuery,
+    distances: &mut [f32],
+) {
+    score_codes(codes, distance_fn, qq, distances);
 }
 
 impl<T> Code<1, T> {
@@ -632,6 +791,104 @@ impl QuantizedQuery {
     }
 }
 
+/// Pre-computed query quantization for the bitwise distance path.
+///
+/// Computed once per query-cluster pair and reused across all codes in the
+/// cluster. For BITS=1 with B_q=4, this stores:
+///   - 4 bit planes of the quantized query (`r_q`) in a flat contiguous buffer
+///   - `v_l`, `delta`, `sum_q_u`: scalar factors for Equation 20
+pub struct QuantizedQuery2 {
+    /// Flat bit-plane buffer: plane j occupies bytes [j*padded_bytes .. (j+1)*padded_bytes].
+    /// bit_planes[j*padded_bytes + i] holds the j-th bit of q_u[i*8 .. i*8+8], packed LSB-first.
+    /// One contiguous allocation replaces the prior b_q separate Vec<u8> allocations.
+    pub bit_planes: Vec<u8>,
+    /// Byte length of one bit plane (= packed data code length = ceil(dim/64)*8).
+    pub padded_bytes: usize,
+    /// Lower bound of query values: v_l = min(r_q[i])
+    pub v_l: f32,
+    /// Quantization step size: delta = (v_r - v_l) / (2^B_q - 1)
+    pub delta: f32,
+    /// Sum of quantized query values: Σ q_u[i]
+    pub sum_q_u: u32,
+    /// Precomputed query-level scalar
+    pub q_norm: f32,
+}
+
+impl QuantizedQuery2 {
+    /// Quantize a query residual `r_q` into B_q-bit unsigned integers and
+    /// decompose into bit planes for AND+popcount inner products.
+    ///
+    /// `padded_bytes` is the byte length of the packed data codes (for alignment).
+    pub fn new(r_q: &[f32], padded_bytes: usize, q_norm: f32) -> Self {
+        let max_val = (1u32 << B_Q) - 1;
+
+        // Two separate folds — each auto-vectorises to a SIMD reduction
+        // (FMINV/FMAXV on ARM NEON, VMINPS horizontal on x86).
+        // A combined tuple fold `(min, max)` breaks this vectorisation (scalar
+        // pair dependency), measured 3.77× slower on Apple M-series.
+        let v_l = r_q.iter().copied().fold(f32::INFINITY, f32::min);
+        let v_r = r_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let range = v_r - v_l;
+        let delta = if range > f32::EPSILON {
+            range / max_val as f32
+        } else {
+            1.0
+        };
+
+        // Single fused pass: quantize each element, accumulate sum, and scatter
+        // bits into a flat bit-plane buffer via chunks_exact(8). The exact-chunk
+        // guarantee lets LLVM eliminate bounds checks and generate tighter code
+        // (44% faster than chunks(8) on Apple M-series).
+        //
+        // Layout: plane j occupies bit_planes[j*padded_bytes .. (j+1)*padded_bytes].
+        let inv_delta = 1.0 / delta;
+        let mut bit_planes = vec![0u8; B_Q as usize * padded_bytes];
+        let mut sum_q_u = 0u32;
+        for (byte_idx, chunk) in r_q.as_chunks::<8>().0.iter().enumerate() {
+            let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
+            for (bit, &v) in chunk.iter().enumerate() {
+                let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
+                sum_q_u += qu;
+                b0 |= (((qu) & 1) as u8) << bit;
+                b1 |= (((qu >> 1) & 1) as u8) << bit;
+                b2 |= (((qu >> 2) & 1) as u8) << bit;
+                b3 |= (((qu >> 3) & 1) as u8) << bit;
+            }
+            bit_planes[byte_idx] = b0;
+            bit_planes[padded_bytes + byte_idx] = b1;
+            bit_planes[2 * padded_bytes + byte_idx] = b2;
+            bit_planes[3 * padded_bytes + byte_idx] = b3;
+        }
+        // Handle remainder for dim not divisible by 8.
+        let rem = r_q.as_chunks::<8>().1;
+        if !rem.is_empty() {
+            let byte_idx = r_q.len() / 8;
+            let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
+            for (bit, &v) in rem.iter().enumerate() {
+                let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
+                sum_q_u += qu;
+                b0 |= (((qu) & 1) as u8) << bit;
+                b1 |= (((qu >> 1) & 1) as u8) << bit;
+                b2 |= (((qu >> 2) & 1) as u8) << bit;
+                b3 |= (((qu >> 3) & 1) as u8) << bit;
+            }
+            bit_planes[byte_idx] = b0;
+            bit_planes[padded_bytes + byte_idx] = b1;
+            bit_planes[2 * padded_bytes + byte_idx] = b2;
+            bit_planes[3 * padded_bytes + byte_idx] = b3;
+        }
+
+        Self {
+            bit_planes,
+            padded_bytes,
+            v_l,
+            delta,
+            sum_q_u,
+            q_norm,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rand::rngs::StdRng;
@@ -640,6 +897,92 @@ mod tests {
 
     use super::*;
     use crate::quantization::Code;
+
+    #[test]
+    fn batch_query_scores_match_individual_scores() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for dim in [1, 7, 8, 63, 64, 65, 300, 1024, 1536] {
+            let centroid: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
+            let residual: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
+            let qq = QuantizedQuery::new(&residual, Code::<1>::packed_len(dim), 1.0, 2.0, 3.0);
+            for count in [0, 1, 2, 7, 64] {
+                let codes: Vec<u8> = (0..count)
+                    .flat_map(|_| {
+                        let vector: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
+                        Code::<1>::quantize(&vector, &centroid).as_ref().to_vec()
+                    })
+                    .collect();
+                for metric in [
+                    DistanceFunction::Euclidean,
+                    DistanceFunction::InnerProduct,
+                    DistanceFunction::Cosine,
+                ] {
+                    let expected: Vec<f32> = codes
+                        .chunks_exact(Code::<1>::size(dim))
+                        .map(|bytes| score_code(bytes, &metric, &qq))
+                        .collect();
+                    for (bytes, expected_score) in
+                        codes.chunks_exact(Code::<1>::size(dim)).zip(&expected)
+                    {
+                        assert_eq!(
+                            Code::<1, _>::new(bytes)
+                                .distance_quantized_query(&metric, &qq)
+                                .to_bits(),
+                            expected_score.to_bits(),
+                            "single dim={dim}, metric={metric:?}"
+                        );
+                        #[cfg(target_arch = "x86_64")]
+                        if std::is_x86_feature_detected!("popcnt") {
+                            // SAFETY: this test checks the required CPU feature.
+                            let score = unsafe { score_code_popcnt(bytes, &metric, &qq) };
+                            assert_eq!(score.to_bits(), expected_score.to_bits());
+                        }
+                        #[cfg(target_arch = "x86_64")]
+                        if std::is_x86_feature_detected!("avx512f")
+                            && std::is_x86_feature_detected!("avx512vpopcntdq")
+                        {
+                            // SAFETY: this test checks both required CPU features.
+                            let score = unsafe { score_code_avx512(bytes, &metric, &qq) };
+                            assert_eq!(score.to_bits(), expected_score.to_bits());
+                        }
+                    }
+                    let mut actual = vec![0.0; count];
+                    Code::<1>::distances_quantized_query(&codes, &metric, &qq, &mut actual);
+                    assert_eq!(
+                        actual.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+                        expected.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+                        "dim={dim}, count={count}, metric={metric:?}"
+                    );
+                    let mut portable = vec![0.0; count];
+                    score_codes(&codes, &metric, &qq, &mut portable);
+                    assert_eq!(
+                        portable.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+                        expected.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+                    );
+                    #[cfg(target_arch = "x86_64")]
+                    if std::is_x86_feature_detected!("popcnt") {
+                        // SAFETY: this test checks the required CPU feature.
+                        unsafe { score_codes_popcnt(&codes, &metric, &qq, &mut portable) };
+                        assert_eq!(
+                            portable.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+                            expected.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+                        );
+                    }
+                    #[cfg(target_arch = "x86_64")]
+                    if std::is_x86_feature_detected!("avx512f")
+                        && std::is_x86_feature_detected!("avx512vpopcntdq")
+                    {
+                        // SAFETY: this test checks both required CPU features.
+                        unsafe { score_codes_avx512(&codes, &metric, &qq, &mut portable) };
+                        assert_eq!(
+                            portable.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+                            expected.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_1bit_attributes() {
