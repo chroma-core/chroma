@@ -2,11 +2,11 @@ from overrides import override
 from typing import Any, Awaitable, Callable, TypeVar
 from functools import wraps
 
-from chromadb.rate_limit import RateLimitEnforcer
+from chromadb.rate_limit import AsyncRateLimitEnforcer, RateLimitEnforcer
 from chromadb.config import System
 
 T = TypeVar("T", bound=Callable[..., Any])
-A = TypeVar("A", bound=Awaitable[Any])
+A = TypeVar("A", bound=Callable[..., Awaitable[Any]])
 
 
 class SimpleRateLimitEnforcer(RateLimitEnforcer):
@@ -26,7 +26,7 @@ class SimpleRateLimitEnforcer(RateLimitEnforcer):
         return wrapper  # type: ignore
 
 
-class SimpleAsyncRateLimitEnforcer(RateLimitEnforcer):
+class SimpleAsyncRateLimitEnforcer(AsyncRateLimitEnforcer):
     """
     A naive implementation of a rate limit enforcer that allows all requests.
     """

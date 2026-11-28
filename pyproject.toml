@@ -30,6 +30,28 @@ mypy_path = "rust/python_bindings"
 module = ["chromadb.proto.*"]
 ignore_errors = true
 
+# Modules that are not yet clean under `mypy --strict`. The mypy pre-commit
+# hook runs in CI (see .github/workflows/pr.yml), so every module NOT listed
+# here is type-checked on each PR and must stay clean. These are silenced only
+# so that enforcement can start now instead of waiting on one large sweep;
+# the list is meant to shrink. Remove an entry and fix what it surfaces.
+[[tool.mypy.overrides]]
+module = [
+    "chromadb.api.*",
+    "chromadb.db.*",
+    "chromadb.execution.*",
+    "chromadb.segment.*",
+    "chromadb.server.*",
+    "chromadb.telemetry.*",
+    "chromadb.test.*",
+    "chromadb.utils.embedding_functions.*",
+    # bin/ helper scripts, checked by the hook but not part of the package
+    "generate_cloudformation",
+    "merge_python_test_inventory",
+    "rust_python_compat_test",
+]
+ignore_errors = true
+
 [project.scripts]
 chroma = "chromadb.cli.cli:app"
 
