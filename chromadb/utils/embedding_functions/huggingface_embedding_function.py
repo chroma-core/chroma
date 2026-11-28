@@ -78,6 +78,9 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             json={"inputs": input, "options": {"wait_for_model": True}},
         ).json()
 
+        if isinstance(response, dict):
+            raise RuntimeError(response.get("error", "Unknown error"))
+
         # Convert to numpy arrays
         return [np.array(embedding, dtype=np.float32) for embedding in response]
 
@@ -197,6 +200,9 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         """
         # Call HuggingFace Embedding Server API for each document
         response = self._session.post(self._api_url, json={"inputs": input}).json()
+
+        if isinstance(response, dict):
+            raise RuntimeError(response.get("error", "Unknown error"))
 
         # Convert to numpy arrays
         return [np.array(embedding, dtype=np.float32) for embedding in response]
