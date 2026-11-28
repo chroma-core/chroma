@@ -1,6 +1,11 @@
 from typing import TYPE_CHECKING, Optional, Union, List, cast, Dict, Any, Tuple
 
-from chromadb.api.models.CollectionCommon import CollectionCommon
+from chromadb.api.models.CollectionCommon import (
+    CollectionCommon,
+    _FALLBACK_BATCH,
+    _split_opts,
+)
+from chromadb.api.ingest import is_tabular, prepare
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -95,7 +100,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def add(
         self,
-        ids: OneOrMany[ID],
+        ids: Union[OneOrMany[ID], Any] = None,
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -106,11 +111,13 @@ class Collection(CollectionCommon["ServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> None:
+        **kwargs: Any,
+    ) -> Optional[int]:
         """Add records to the collection.
 
         Args:
-            ids: Record IDs to add.
+            ids: Record IDs to add, or a tabular dataset (DataFrame, dict of columns,
+                record dict, or list of dicts).
             embeddings: Embeddings to add. If None, embeddings are computed.
             metadatas: Optional metadata for each record.
             documents: Optional documents for each record.
@@ -123,6 +130,11 @@ class Collection(CollectionCommon["ServerAPI"]):
             ValueError: If lengths of provided fields do not match.
             ValueError: If an ID already exists.
         """
+        if is_tabular(ids):
+            return self.add_data(ids, **kwargs)
+        if ids is None and "data" in kwargs and is_tabular(kwargs["data"]):
+            data = kwargs.pop("data")
+            return self.add_data(data, **kwargs)
 
         add_request = self._validate_and_prepare_add_request(
             ids=ids,
@@ -514,7 +526,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def upsert(
         self,
-        ids: OneOrMany[ID],
+        ids: Union[OneOrMany[ID], Any] = None,
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -525,17 +537,25 @@ class Collection(CollectionCommon["ServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> None:
+        **kwargs: Any,
+    ) -> Optional[int]:
         """Create or update records by ID.
 
         Args:
-            ids: Record IDs to upsert.
+            ids: Record IDs to upsert, or a tabular dataset (DataFrame, dict of columns,
+                record dict, or list of dicts).
             embeddings: Embeddings to add or update. If None, embeddings are computed.
             metadatas: Metadata to add or update.
             documents: Documents to add or update.
             images: Images to add or update.
             uris: URIs for loading images.
         """
+        if is_tabular(ids):
+            return self.upsert_data(ids, **kwargs)
+        if ids is None and "data" in kwargs and is_tabular(kwargs["data"]):
+            data = kwargs.pop("data")
+            return self.upsert_data(data, **kwargs)
+
         upsert_request = self._validate_and_prepare_upsert_request(
             ids=ids,
             embeddings=embeddings,
@@ -555,6 +575,102 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+    def add_data(self, data: Any, **opts: Any) -> int:
+        """Add a DataFrame, dict of columns, record dict, or list of dicts.
+
+        Options: document_cols (str|list), id_col, metadata_cols, embedding_col,
+        id_strategy ('uuid'|'hash'), doc_separator, nested ('json'|'drop'|'error'),
+        batch_size, progress (bool). Returns the number of rows written.
+        """
+        prep, batch_size, progress = _split_opts(opts)
+        prepared = prepare(data, **prep)
+        if len(prepared) == 0:
+            return 0
+        if batch_size is None:
+            try:
+                batch_size = self._client.get_max_batch_size()
+            except Exception:
+                batch_size = _FALLBACK_BATCH
+
+        batches = prepared.batches(batch_size)
+        if progress:
+            try:
+                from tqdm import tqdm
+                total_batches = (len(prepared) + batch_size - 1) // batch_size
+                batches = tqdm(batches, total=total_batches, desc="Adding data")
+            except ImportError:
+                pass
+
+        for kw in batches:
+            self.add(**kw)
+        return len(prepared)
+
+    def upsert_data(self, data: Any, **opts: Any) -> int:
+        """Upsert a DataFrame, dict of columns, record dict, or list of dicts.
+
+        Options: document_cols (str|list), id_col, metadata_cols, embedding_col,
+        id_strategy ('uuid'|'hash'), doc_separator, nested ('json'|'drop'|'error'),
+        batch_size, progress (bool). Returns the number of rows written.
+        """
+        prep, batch_size, progress = _split_opts(opts)
+        prepared = prepare(data, **prep)
+        if len(prepared) == 0:
+            return 0
+        if batch_size is None:
+            try:
+                batch_size = self._client.get_max_batch_size()
+            except Exception:
+                batch_size = _FALLBACK_BATCH
+
+        batches = prepared.batches(batch_size)
+        if progress:
+            try:
+                from tqdm import tqdm
+                total_batches = (len(prepared) + batch_size - 1) // batch_size
+                batches = tqdm(batches, total=total_batches, desc="Upserting data")
+            except ImportError:
+                pass
+
+        for kw in batches:
+            self.upsert(**kw)
+        return len(prepared)
+
+    # Aliases
+    add_dataframe = add_data
+    add_records = add_data
+    upsert_dataframe = upsert_data
+    upsert_records = upsert_data
+
+    def get_dataframe(
+        self,
+        ids: Optional[OneOrMany[ID]] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = ["metadatas", "documents", "embeddings"],
+    ) -> Any:
+        """Retrieve collection records as a pandas DataFrame."""
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required for get_dataframe(). Install it with 'pip install pandas'.")
+
+        got = self.get(ids=ids, where=where, limit=limit, offset=offset, where_document=where_document, include=include)
+        records = []
+        n = len(got["ids"])
+        for i in range(n):
+            row = {"id": got["ids"][i]}
+            if "documents" in got and got["documents"] is not None and i < len(got["documents"]):
+                row["document"] = got["documents"][i]
+            if "embeddings" in got and got["embeddings"] is not None and i < len(got["embeddings"]):
+                row["embedding"] = got["embeddings"][i]
+            if "metadatas" in got and got["metadatas"] is not None and i < len(got["metadatas"]):
+                m = got["metadatas"][i] or {}
+                row.update(m)
+            records.append(row)
+        return pd.DataFrame(records)
 
     def delete(
         self,
