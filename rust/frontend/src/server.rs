@@ -27,16 +27,15 @@ use chroma_types::{
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
     DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
     DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
-    ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
-    GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
-    HealthCheckResponse, IndexStatusResponse, InternalCollectionConfiguration,
-    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
-    Schema, SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
-    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
-    UpsertCollectionRecordsResponse,
+    ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByIdRequest,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetRequestPayload,
+    GetResponse, GetTenantRequest, GetTenantResponse, HealthCheckResponse, IndexStatusResponse,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, QueryRequest,
+    QueryRequestPayload, QueryResponse, Schema, SearchRequest, SearchRequestPayload,
+    SearchResponse, UpdateCollectionPayload, UpdateCollectionRecordsPayload,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
 use frontend_core::auth::AuthError;
 use frontend_core::routes::{SystemMetrics, SystemState};
@@ -150,7 +149,6 @@ pub struct Metrics {
     list_collections: Counter<u64>,
     count_collections: Counter<u64>,
     get_collection: Counter<u64>,
-    get_collection_by_crn: Counter<u64>,
     get_collection_by_id: Counter<u64>,
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
@@ -190,7 +188,6 @@ impl Metrics {
             list_collections: meter.u64_counter("list_collections").build(),
             count_collections: meter.u64_counter("count_collections").build(),
             get_collection: meter.u64_counter("get_collection").build(),
-            get_collection_by_crn: meter.u64_counter("get_collection_by_crn").build(),
             get_collection_by_id: meter.u64_counter("get_collection_by_id").build(),
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
@@ -300,7 +297,6 @@ impl FrontendServer {
             )
             .merge(frontend_core::routes::system_router::<FrontendServer>())
             .route("/api/v2/reset", post(reset))
-            .route("/api/v2/collections/{crn}", get(get_collection_by_crn))
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
                 get(get_collection_by_id),
@@ -1489,65 +1485,6 @@ async fn get_collection(
     })?;
     let request = GetCollectionRequest::try_new(tenant, database_name, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
-    Ok(Json(collection))
-}
-
-/// Get collection by CRN
-/// Returns a collection by Chroma Resource Name.
-#[utoipa::path(
-    get,
-    path = "/api/v2/collections/{crn}",
-    summary = "Get collection by CRN",
-    description = "Returns a collection by Chroma Resource Name.",
-    tag = "Collection",
-    security(
-        ("ApiKeyAuth" = [])
-    ),
-    responses(
-        (status = 200, description = "Collection found", body = Collection),
-        (status = 401, description = "Unauthorized", body = ErrorResponse),
-        (status = 404, description = "Collection not found", body = ErrorResponse),
-        (status = 500, description = "Server error", body = ErrorResponse)
-    ),
-    params(
-        ("crn" = String, Path, description = "Chroma Resource Name", example = "my_tenant:my_database:my_collection")
-    ),
-    extensions(
-        ("x-codeSamples" = json!([
-            {
-                "lang": "typescript",
-                "label": "Get collection by CRN",
-                "source": "const collection = await client.getCollectionByCrn('my_tenant:my_database:my_collection');"
-            },
-            {
-                "lang": "python",
-                "label": "Get collection by CRN",
-                "source": "collection = client.get_collection_by_crn('my_tenant:my_database:my_collection')"
-            }
-        ])),
-        ("x-hidden" = json!(true))
-    )
-)]
-async fn get_collection_by_crn(
-    headers: HeaderMap,
-    Path(crn): Path<String>,
-    State(mut server): State<FrontendServer>,
-) -> Result<Json<Collection>, ServerError> {
-    server.metrics.get_collection_by_crn.add(1, &[]);
-    tracing::info!(name: "get_collection_by_crn", crn = %crn);
-    server
-        .authenticate_and_authorize(
-            &headers,
-            AuthzAction::GetCollectionByCrn,
-            AuthzResource {
-                tenant: None,
-                database: None,
-                collection: Some(crn.clone()),
-            },
-        )
-        .await?;
-    let request = GetCollectionByCrnRequest::try_new(crn)?;
-    let collection = server.frontend.get_collection_by_crn(request).await?;
     Ok(Json(collection))
 }
 
@@ -4071,7 +4008,6 @@ impl Modify for ChromaTokenSecurityAddon {
         list_collections,
         count_collections,
         get_collection,
-        get_collection_by_crn,
         get_collection_by_id,
         update_collection,
         delete_collection,
