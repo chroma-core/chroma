@@ -652,23 +652,37 @@ fn create_union_subquery_for_int_float_ops(
     subq1
 }
 
+/// Combines expressions into a balanced binary tree so that the depth of the resulting
+/// expression grows with log(n) instead of n. SQLite rejects expression trees deeper than
+/// 1000 levels, which a left-deep chain of binary AND/OR hits with ~1000 operands.
+fn combine_balanced(
+    mut exprs: Vec<SimpleExpr>,
+    combine: fn(SimpleExpr, SimpleExpr) -> SimpleExpr,
+    identity: bool,
+) -> SimpleExpr {
+    if exprs.is_empty() {
+        return SimpleExpr::Value(sea_query::Value::Bool(Some(identity)));
+    }
+    while exprs.len() > 1 {
+        let mut next = Vec::with_capacity(exprs.len().div_ceil(2));
+        let mut iter = exprs.into_iter();
+        while let Some(left) = iter.next() {
+            match iter.next() {
+                Some(right) => next.push(combine(left, right)),
+                None => next.push(left),
+            }
+        }
+        exprs = next;
+    }
+    exprs.pop().expect("exprs is non-empty")
+}
+
 impl IntoSqliteExpr for CompositeExpression {
     fn eval(&self) -> SimpleExpr {
+        let children = self.children.iter().map(|child| child.eval()).collect();
         match self.operator {
-            BooleanOperator::And => {
-                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(true)));
-                for child in &self.children {
-                    expr = Expr::expr(expr).and(child.eval());
-                }
-                expr
-            }
-            BooleanOperator::Or => {
-                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(false)));
-                for child in &self.children {
-                    expr = Expr::expr(expr).or(child.eval());
-                }
-                expr
-            }
+            BooleanOperator::And => combine_balanced(children, |l, r| Expr::expr(l).and(r), true),
+            BooleanOperator::Or => combine_balanced(children, |l, r| Expr::expr(l).or(r), false),
         }
     }
 }
@@ -1704,6 +1718,55 @@ mod tests {
             }
             other => panic!("Expected IntArray for 'scores', got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn test_where_with_many_or_operands() {
+        let mut meta = HashMap::new();
+        meta.insert("g".to_string(), UpdateMetadataValue::Int(5));
+        let logs = vec![LogRecord {
+            log_offset: 0,
+            record: OperationRecord {
+                id: "id1".to_string(),
+                metadata: Some(meta),
+                document: None,
+                operation: Operation::Add,
+                embedding: None,
+                encoding: None,
+            },
+        }];
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        let eq = |i: i64| {
+            Where::Metadata(MetadataExpression {
+                key: "g".to_string(),
+                comparison: MetadataComparison::Primitive(
+                    PrimitiveOperator::Equal,
+                    MetadataValue::Int(i),
+                ),
+            })
+        };
+
+        // SQLite refuses expression trees deeper than 1000 levels.
+        let or_where = Where::disjunction((0..1500).map(eq));
+        let plan = make_get_plan(&cas, Some(or_where));
+        let result = reader.get(plan).await.expect("get with 1500 $or operands");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        let ne = |i: i64| {
+            Where::Metadata(MetadataExpression {
+                key: "g".to_string(),
+                comparison: MetadataComparison::Primitive(
+                    PrimitiveOperator::NotEqual,
+                    MetadataValue::Int(i),
+                ),
+            })
+        };
+        let and_where = Where::conjunction((100..1600).map(ne));
+        let plan = make_get_plan(&cas, Some(and_where));
+        let result = reader.get(plan).await.expect("get with 1500 $and operands");
+        assert_eq!(result.result.records.len(), 1);
     }
 
     #[tokio::test]
