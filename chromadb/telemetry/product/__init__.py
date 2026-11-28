@@ -4,6 +4,7 @@ from typing import ClassVar, Dict, Any
 import uuid
 import chromadb
 from chromadb.config import Component
+from chromadb.utils import LazyClassAttribute
 from pathlib import Path
 from enum import Enum
 
@@ -48,7 +49,12 @@ class ProductTelemetryEvent:
 
 
 class ProductTelemetryClient(Component):
-    USER_ID_PATH = str(Path.home() / ".cache" / "chroma" / "telemetry_user_id")
+    # Resolved on first use, not at import time: Path.home() raises when
+    # $HOME is unset and the uid has no passwd entry, which would break
+    # `import chromadb` even with telemetry disabled.
+    USER_ID_PATH: str = LazyClassAttribute(  # type: ignore[assignment]
+        lambda: str(Path.home() / ".cache" / "chroma" / "telemetry_user_id")
+    )
     UNKNOWN_USER_ID = "UNKNOWN"
     SERVER_CONTEXT: ServerContext = ServerContext.NONE
     _curr_user_id = None
