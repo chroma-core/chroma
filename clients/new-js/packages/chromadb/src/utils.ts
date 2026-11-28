@@ -150,13 +150,13 @@ const validateEmbeddings = ({
   });
 };
 
-const validateDocuments = ({
+export const validateDocuments = ({
   documents,
   nullable = false,
   fieldName = "documents",
 }: {
   documents: (string | null | undefined)[];
-  fieldName: string;
+  fieldName?: string;
   nullable?: boolean;
 }) => {
   if (!Array.isArray(documents)) {
@@ -175,6 +175,16 @@ const validateDocuments = ({
     if (!nullable && typeof document !== "string" && !document) {
       throw new ChromaValueError(
         `Expected each document to be a string, but got ${typeof document}`,
+      );
+    }
+    // Reject embedded NUL bytes — they corrupt the full-text search index (#7388).
+    // Mirrors the Python client's validate_documents guard so every client
+    // surface fails the write the same way.
+    if (typeof document === "string" && document.includes("\u0000")) {
+      throw new ChromaValueError(
+        "Document contains embedded NUL (U+0000) characters, " +
+          "which corrupt the full-text search index. " +
+          "Strip or replace NUL bytes before upserting.",
       );
     }
   });

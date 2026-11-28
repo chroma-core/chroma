@@ -387,6 +387,17 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(sql, params)
 
         if "chroma:document" in metadata:
+            document = metadata["chroma:document"]
+            # Reject embedded NUL bytes — they corrupt the FTS5 inverted index
+            # at the SQLite layer and also trip the Rust fulltext tokenizer's
+            # null-terminator guard (#7388).  Catching this at the segment level
+            # protects all ingestion paths, not just the Python API.
+            if "\x00" in document:
+                raise ValueError(
+                    "Document contains embedded NUL (U+0000) characters, "
+                    "which corrupt the full-text search index. "
+                    "Strip or replace NUL bytes before upserting."
+                )
             t = Table("embedding_fulltext_search")
 
             def insert_into_fulltext_search() -> None:
@@ -396,7 +407,7 @@ class SqliteMetadataSegment(MetadataReader):
                     .columns(t.rowid, t.string_value)
                     .insert(
                         ParameterValue(id),
-                        ParameterValue(metadata["chroma:document"]),
+                        ParameterValue(document),
                     )
                 )
                 sql, params = get_sql(q)
