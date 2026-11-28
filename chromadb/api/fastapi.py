@@ -114,6 +114,12 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 self._session.headers[header] = value.get_secret_value()
 
     @override
+    def stop(self) -> None:
+        super().stop()
+        if hasattr(self, "_session") and not self._session.is_closed:
+            self._session.close()
+
+    @override
     def get_request_headers(self) -> Mapping[str, str]:
         return dict(self._session.headers)
 
