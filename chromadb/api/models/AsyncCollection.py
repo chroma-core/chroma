@@ -232,7 +232,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
         Args:
-            query_embeddings: The embeddings to get the closes neighbors of. Optional.
+            query_embeddings: Numeric embeddings to query for: a single vector,
+                a list of vectors, a 1D or 2D NumPy array, or a list of NumPy
+                arrays. The input container type is not preserved in results.
+                Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
             query_images: The images to get the closes neighbors of. Optional.
             ids: A subset of ids to search within. Optional.
@@ -243,6 +246,14 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Returns:
             QueryResult: A QueryResult object containing the results.
+                When "embeddings" is included, results["embeddings"] is a list
+                of NumPy arrays, one per query in query order. Each nonempty
+                array has one row per matching record and one column per
+                embedding dimension; a query with no matches has an empty
+                array. No fixed NumPy dtype or shape for empty arrays is
+                guaranteed. Otherwise, results["embeddings"] is None.
+                Embeddings are not included by default. See QueryResult for
+                conversion to nested Python lists.
 
         Raises:
             ValueError: If you don't provide either query_embeddings, query_texts, or query_images
