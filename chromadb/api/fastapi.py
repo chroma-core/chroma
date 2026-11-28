@@ -71,8 +71,12 @@ logger = logging.getLogger(__name__)
 
 
 class FastAPI(BaseHTTPClient, ServerAPI):
+    _session: httpx.Client
+    _owned_session: Optional[httpx.Client]
+
     def __init__(self, system: System):
         super().__init__(system)
+        self._owned_session = None
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
 
@@ -95,6 +99,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             )
         else:
             self._session = httpx.Client(timeout=None, limits=self.http_limits)
+        self._owned_session = self._session
 
         self._header = system.settings.chroma_server_headers or {}
         self._header["Content-Type"] = "application/json"
@@ -112,6 +117,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             _headers = self._auth_provider.authenticate()
             for header, value in _headers.items():
                 self._session.headers[header] = value.get_secret_value()
+
+    @override
+    def stop(self) -> None:
+        super().stop()
+        owned = self._owned_session
+        self._owned_session = None
+        if owned is not None:
+            owned.close()
 
     @override
     def get_request_headers(self) -> Mapping[str, str]:
