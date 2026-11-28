@@ -103,3 +103,40 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+def test_normalize_embeddings_empty_list() -> None:
+    from chromadb.api.types import normalize_embeddings
+
+    # Empty list should raise ValueError
+    with pytest.raises(ValueError, match="Expected Embeddings to be non-empty list"):
+        normalize_embeddings([])
+
+    # List containing empty embedding should raise descriptive ValueError, not IndexError
+    with pytest.raises(
+        ValueError,
+        match="Expected each embedding in the embeddings to be a non-empty list, got an empty list at pos 0",
+    ):
+        normalize_embeddings([[]])
+
+    with pytest.raises(
+        ValueError,
+        match="Expected each embedding in the embeddings to be a non-empty list, got an empty list at pos 0",
+    ):
+        normalize_embeddings([[], [1.0, 2.0]])
+
+    with pytest.raises(
+        ValueError,
+        match="Expected each embedding in the embeddings to be a non-empty list, got an empty list at pos 1",
+    ):
+        normalize_embeddings([[1.0, 2.0], []])
+
+
+def test_normalize_insert_record_set_empty_embeddings() -> None:
+    from chromadb.api.types import normalize_insert_record_set
+
+    with pytest.raises(
+        ValueError,
+        match="Expected each embedding in the embeddings to be a non-empty list, got an empty list at pos 0",
+    ):
+        normalize_insert_record_set(ids=["1"], embeddings=[[]])
