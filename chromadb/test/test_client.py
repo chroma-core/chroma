@@ -343,3 +343,57 @@ def test_rust_bindings_api_stop_closes_bindings() -> None:
     bindings.close.assert_called_once_with()
     assert hasattr(api, "bindings") is False
     assert api._running is False
+
+
+def test_fastapi_stop_closes_session() -> None:
+    """Test FastAPI.stop() closes the underlying httpx session."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    from chromadb.api.fastapi import FastAPI
+
+    api = FastAPI.__new__(FastAPI)
+    mock_session = MagicMock()
+    mock_session.is_closed = False
+    api._session = mock_session
+    api._running = True
+
+    api.stop()
+
+    mock_session.close.assert_called_once_with()
+    assert api._running is False
+
+
+def test_fastapi_session_closed_on_system_stop() -> None:
+    """Test that a FastAPI component's httpx session is closed when its System stops."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    system = System(
+        Settings(
+            chroma_server_host="localhost",
+            chroma_server_http_port="8000",
+            chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        )
+    )
+    api = system.instance(FastAPI)
+    assert not api._session.is_closed
+
+    system.stop()
+    assert api._session.is_closed
+
+
+def test_http_client_close_closes_session() -> None:
+    """Test that closing an HttpClient closes its underlying FastAPI httpx session."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with (
+        patch("chromadb.api.client.Client._validate_tenant_database"),
+        patch("chromadb.api.client.Client.get_user_identity"),
+    ):
+        client = chromadb.HttpClient(host="localhost", port=8000)
+        api = client._server
+        assert not api._session.is_closed
+        client.close()
+        assert api._session.is_closed
