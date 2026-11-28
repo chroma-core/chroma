@@ -14,7 +14,8 @@ Sparse embeddings are useful for retrieval tasks where you want to match on spec
 This embedding function relies on the `httpx` python package, which you can install with `pip install httpx`.
 
 ```python
-from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction, ChromaCloudSpladeEmbeddingModel
+from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction
+from chromadb.utils.embedding_functions.chroma_cloud_splade_embedding_function import ChromaCloudSpladeEmbeddingModel
 import os
 
 os.environ["CHROMA_API_KEY"] = "YOUR_API_KEY"

@@ -381,7 +381,7 @@ The `Val` class represents constant values in ranking expressions. Numbers are a
 
 <CodeGroup>
 ```python Python
-from chromadb import Val
+from chromadb.execution.expression import Val
 
 # Automatic conversion (these are equivalent)
 score1 = Knn(query="machine learning") * 0.5
@@ -586,7 +586,8 @@ Here's a practical example combining different ranking features:
 
 <CodeGroup>
 ```python Python
-from chromadb import Search, K, Knn, Val
+from chromadb import Search, K, Knn
+from chromadb.execution.expression import Val
 
 # Complex ranking with filtering and mathematical functions
 search = (Search()

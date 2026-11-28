@@ -11,7 +11,8 @@ For example, SDK code like this:
 
 <CodeGroup>
 ```python Python
-from chromadb import Search, K, Knn, GroupBy, MinK
+from chromadb import Search, K, Knn
+from chromadb.execution.expression import GroupBy, MinK
 
 search = Search(
     where=K("status") == "active",
