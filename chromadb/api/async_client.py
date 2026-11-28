@@ -34,6 +34,7 @@ from chromadb.api.types import (
     URIs,
     DefaultEmbeddingFunction,
     DeleteResult,
+    validate_pagination,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
@@ -172,6 +173,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
     ) -> Sequence[AsyncCollection]:
+        validate_pagination(limit, offset)
         models = await self._server.list_collections(
             limit, offset, tenant=self.tenant, database=self.database
         )
@@ -690,6 +692,7 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[Database]:
+        validate_pagination(limit, offset)
         return await self._server.list_databases(
             limit=limit, offset=offset, tenant=tenant
         )

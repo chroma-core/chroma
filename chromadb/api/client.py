@@ -32,6 +32,7 @@ from chromadb.api.types import (
     IncludeMetadataDocumentsDistances,
     DefaultEmbeddingFunction,
     DeleteResult,
+    validate_pagination,
 )
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
@@ -167,6 +168,7 @@ class Client(SharedSystemClient, ClientAPI):
         Returns:
             Sequence[Collection]: Collection objects for the current tenant.
         """
+        validate_pagination(limit, offset)
         return [
             Collection(client=self._server, model=model)
             for model in self._server.list_collections(
@@ -854,6 +856,7 @@ class AdminClient(SharedSystemClient, AdminAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[Database]:
+        validate_pagination(limit, offset)
         return self._server.list_databases(limit, offset, tenant=tenant)
 
     @override

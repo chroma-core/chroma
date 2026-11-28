@@ -1369,6 +1369,28 @@ def validate_n_results(n_results: int) -> int:
     return n_results
 
 
+U32_MAX = 2**32 - 1
+
+
+def validate_pagination(limit: Optional[int], offset: Optional[int]) -> None:
+    """Validate list pagination before it reaches the Rust bindings.
+
+    The bindings take limit/offset as u32 values, so anything outside that
+    range raises a raw OverflowError instead of a Chroma error.
+
+    Raises:
+        TypeError: If limit or offset is not an integer.
+        ValueError: If limit or offset is negative or greater than U32_MAX.
+    """
+    for name, value in (("limit", limit), ("offset", offset)):
+        if value is None:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"{name} must be an integer, got {type(value).__name__}")
+        if value < 0 or value > U32_MAX:
+            raise ValueError(f"{name} must be between 0 and {U32_MAX}, got {value}")
+
+
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of numpy arrays of ints, or floats"""
     if not isinstance(embeddings, (list, np.ndarray)):
