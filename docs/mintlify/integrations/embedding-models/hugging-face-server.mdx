@@ -17,7 +17,7 @@ docker compose -f examples/server_side_embeddings/huggingface/docker-compose.yml
 or
 
 ```terminal
-docker run -p 8001:80 -d -rm --name huggingface-embedding-server ghcr.io/huggingface/text-embeddings-inference:cpu-0.3.0 --model-id BAAI/bge-small-en-v1.5 --revision -main
+docker run -p 8001:80 -d --rm --name huggingface-embedding-server ghcr.io/huggingface/text-embeddings-inference:cpu-0.3.0 --model-id BAAI/bge-small-en-v1.5 --revision main
 ```
 
 <Warning>
