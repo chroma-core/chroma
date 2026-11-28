@@ -349,7 +349,8 @@ export const serializeMetadata = (
   const result: SerializedMetadata = {};
 
   Object.entries(metadata).forEach(([key, value]) => {
-    if (value === null || value === undefined) {
+    // Null values delete metadata fields in update and upsert requests.
+    if (value === undefined) {
       return;
     }
     if (validateSparseVector(value)) {
